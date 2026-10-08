@@ -15,9 +15,9 @@
 #
 
 # Only include Shield apps for first party targets
-ifneq ($(filter $(word 2,$(subst _, ,$(TARGET_PRODUCT))), galen galen_tab),)
-include device/nvidia/shield-common/shield.mk
-endif
+#ifneq ($(filter $(word 2,$(subst _, ,$(TARGET_PRODUCT))), galen galen_tab),)
+#include device/nvidia/shield-common/shield.mk
+#endif
 
 TARGET_REFERENCE_DEVICE ?= galen
 TARGET_TEGRA_VARIANT    ?= common
