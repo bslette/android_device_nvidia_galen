@@ -21,3 +21,15 @@ soong_namespace {
 subdirs = [
     "init"
 ]
+
+// Placeholder for the Tegra EFI boot control HAL, which has no source in the
+// lineage-20 tree. tegra.mk requests this name when TARGET_TEGRA_BOOTCTRL=efi.
+// It pulls in the generic AOSP boot HAL, so the service starts but slot
+// switching is not implemented.
+cc_library_shared {
+    name: "android.hardware.boot@1.0-impl.nvidia-efi",
+    relative_install_path: "hw",
+    vendor: true,
+    recovery_available: true,
+    required: ["android.hardware.boot@1.0-impl"],
+}
