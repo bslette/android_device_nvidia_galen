@@ -1,0 +1,4 @@
+# BRING-UP ONLY (2026-10-09). The stock rule in init.usb.rc sets sys.usb.config from
+# persist.sys.usb.config, which is "none" on this device, so adbd never starts. Force adb.
+on boot
+    setprop sys.usb.config adb

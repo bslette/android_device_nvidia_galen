@@ -172,6 +172,8 @@ endif
 endif
 endif
 
-# BRING-UP ONLY: serial-console logcat service (see bringup/bringup_logcat.rc).
+# BRING-UP ONLY (2026-10-09): adb on by default, with this build host's key pre-authorized.
+# See bringup/bringup_adb.rc. Remove before shipping.
+PRODUCT_ADB_KEYS := device/nvidia/galen/bringup/adbkey.pub
 PRODUCT_COPY_FILES += \
-    device/nvidia/galen/bringup/bringup_logcat.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup_logcat.rc
+    device/nvidia/galen/bringup/bringup_adb.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup_adb.rc
