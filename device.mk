@@ -171,3 +171,7 @@ endif
 endif
 endif
 endif
+
+# BRING-UP ONLY: serial-console logcat service (see bringup/bringup_logcat.rc).
+PRODUCT_COPY_FILES += \
+    device/nvidia/galen/bringup/bringup_logcat.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup_logcat.rc
