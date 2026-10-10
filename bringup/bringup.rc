@@ -1,0 +1,23 @@
+# BRING-UP ONLY (2026-10-09). Runtime settings found necessary to get the Shield-R display stack
+# running on a Xavier NX. Each one was measured on the board; see the commit message. Remove or
+# replace with proper fixes before shipping.
+
+on init
+    # Skia RenderEngine aborts at start-up ("Unable to generate SkSurface. isTextureValid:0")
+    # on this GPU stack; the GLES engine works.
+    setprop debug.renderengine.backend threaded
+    # hwcomposer segfaults in gralloc.tegra ScratchAssign when composing layers into scratch buffers.
+    setprop vendor.nvidia.hwc.no_scratchblit 1
+    # Let adbd keep root (ro.debuggable=1). "adb root" itself is refused: it asks system_server.
+    setprop service.adb.root 1
+
+on post-fs-data
+    # The GPU is runtime-suspended after probe and only /dev/nvgpu/igpu0/power exists until its
+    # first power-on; libEGL_tegra then fails (EGL_BAD_ACCESS). Power it on once the module is up.
+    wait /sys/devices/platform/17000000.gv11b/power/control 20
+    write /sys/devices/platform/17000000.gv11b/power/control on
+
+on boot
+    # persist.sys.usb.config is "none" here, so adbd never started. Ask for adb.
+    setprop persist.sys.usb.config adb
+    setprop sys.usb.config adb

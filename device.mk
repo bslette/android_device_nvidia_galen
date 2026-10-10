@@ -173,7 +173,7 @@ endif
 endif
 
 # BRING-UP ONLY (2026-10-09): adb on by default, with this build host's key pre-authorized.
-# See bringup/bringup_adb.rc. Remove before shipping.
+# See bringup/bringup.rc. Remove before shipping.
 PRODUCT_ADB_KEYS := device/nvidia/galen/bringup/adbkey.pub
 PRODUCT_COPY_FILES += \
-    device/nvidia/galen/bringup/bringup_adb.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup_adb.rc
+    device/nvidia/galen/bringup/bringup.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup.rc
