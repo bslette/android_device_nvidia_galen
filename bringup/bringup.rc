@@ -21,3 +21,10 @@ on boot
     # persist.sys.usb.config is "none" here, so adbd never started. Ask for adb.
     setprop persist.sys.usb.config adb
     setprop sys.usb.config adb
+
+on property:sys.boot_completed=1
+    # Android enters deep suspend (SC7) once the boot is idle, which drops USB/adb mid-session.
+    write /sys/power/wake_lock bringup
+    # Stand-in for the NVIDIA EFI boot-control HAL: restore the AndroidLauncher retry counter,
+    # otherwise the board switches to the empty boot chain B after 3 boots.
+    exec_background - root root -- /vendor/bin/rootfs_retry_reset.sh

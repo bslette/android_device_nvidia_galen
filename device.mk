@@ -176,4 +176,5 @@ endif
 # See bringup/bringup.rc. Remove before shipping.
 PRODUCT_ADB_KEYS := device/nvidia/galen/bringup/adbkey.pub
 PRODUCT_COPY_FILES += \
-    device/nvidia/galen/bringup/bringup.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup.rc
+    device/nvidia/galen/bringup/bringup.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/bringup.rc \
+    device/nvidia/galen/bringup/rootfs_retry_reset.sh:$(TARGET_COPY_OUT_VENDOR)/bin/rootfs_retry_reset.sh
