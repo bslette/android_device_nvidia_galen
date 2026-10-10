@@ -28,3 +28,6 @@ on property:sys.boot_completed=1
     # Stand-in for the NVIDIA EFI boot-control HAL: restore the AndroidLauncher retry counter,
     # otherwise the board switches to the empty boot chain B after 3 boots.
     exec_background - root root -- /vendor/bin/rootfs_retry_reset.sh
+    # com.nvidia.NvCPLSvc (Shield control panel) dies in onCreate with IndexOutOfBoundsException
+    # and restarts ~5 times a second (987 crashes in one boot), loading system_server and zygote.
+    exec_background - system system -- /system/bin/pm disable-user --user 0 com.nvidia.NvCPLSvc
