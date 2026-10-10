@@ -86,4 +86,4 @@ VENDOR_SECURITY_PATCH := 2021-04-05
 include device/nvidia/t194-common/BoardConfigCommon.mk
 
 # BRING-UP ONLY (2026-10-09): permissive so one boot shows every denial. Remove before use.
-BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive printk.devkmsg=on
+BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive printk.devkmsg=on loglevel=4
