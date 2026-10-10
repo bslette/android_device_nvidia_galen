@@ -31,5 +31,18 @@ function patch_rey_bpmp_dtb() {
   echo "";
 }
 
+function patch_t194_chip_caps() {
+  echo -n "Patching T194 chip capabilities...";
+
+  # Shield-TV libnvhwcomposer rejects > 7 display windows; the chip library reports 8 for T194.
+  # See patch_chip_caps.py for the measurement and the exact bytes.
+  local NVGPU=${LINEAGE_ROOT}/${OUTDIR}/common/rel-shield-r/nvgpu
+  python3 ${LINEAGE_ROOT}/device/nvidia/galen/extract/patch_chip_caps.py \
+    ${NVGPU}/lib64/libnvrm_chip.so ${NVGPU}/lib/libnvrm_chip.so
+
+  echo "";
+}
+
 patch_rey_qspi_bct;
 patch_rey_bpmp_dtb;
+patch_t194_chip_caps;
