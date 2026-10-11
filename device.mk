@@ -30,6 +30,12 @@ TARGET_LIGHT_HAL      ?= tegra
 
 TARGET_HAS_BATTERY    ?= false
 
+# GV11B (Xavier GPU) has no nouveau support in 6.12: render in software
+# until it does, and give a root console + crash logcat on the debug UART.
+TARGET_GRAPHICS                ?= swiftshader
+TARGET_CONSOLE_AS_ROOT         ?= true
+TARGET_ENABLE_LOGCAT_TO_SERIAL ?= true
+
 include device/nvidia/t194-common/t194.mk
 
 # System properties
