@@ -78,7 +78,7 @@ TARGET_KERNEL_SOURCE          := vendor/nvidia/$(TARGET_KERNEL_PLATFORM_TARGET)
 BOARD_KERNEL_IMAGE_NAME       := Image
 endif
 
-BOARD_KERNEL_CMDLINE          := firmware_class.path=/vendor/firmware cpufreq.default_governor=performance nouveau.atomic=1 cma=512MB
+BOARD_KERNEL_CMDLINE          := firmware_class.path=/vendor/firmware cpufreq.default_governor=performance nouveau.atomic=1 cma=512MB androidboot.seriallogging=ttyTCU0
 include device/nvidia/galen/modules.mk
 
 # Recovery
