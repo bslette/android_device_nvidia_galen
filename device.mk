@@ -30,9 +30,7 @@ TARGET_LIGHT_HAL      ?= tegra
 
 TARGET_HAS_BATTERY    ?= false
 
-# GV11B (Xavier GPU) has no nouveau support in 6.12: render in software
-# until it does, and give a root console + crash logcat on the debug UART.
-TARGET_GRAPHICS                ?= swiftshader
+# Root console + crash logcat on the debug UART (bring-up).
 TARGET_CONSOLE_AS_ROOT         ?= true
 TARGET_ENABLE_LOGCAT_TO_SERIAL ?= true
 
@@ -127,3 +125,9 @@ PRODUCT_PACKAGES += \
     nv_bootloader_payload_updater.product
 endif
 endif
+
+# GV11B (Xavier GPU) firmware for nouveau, repacked from NVIDIA L4T R35
+# (nouveau-gv11b repack-gv11b-fw.py). Local bring-up only: NVIDIA firmware,
+# do not publish this directory.
+PRODUCT_COPY_FILES += \
+    $(call find-copy-subdir-files,*,device/nvidia/galen/firmware-gv11b,$(TARGET_COPY_OUT_VENDOR)/firmware/nvidia/gv11b)
