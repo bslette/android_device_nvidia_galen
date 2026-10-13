@@ -30,6 +30,10 @@ BOARD_VENDOR_KERNEL_MODULES_LOAD += \
 BOARD_VENDOR_KERNEL_MODULES_LOAD += \
     tegra_cec
 
+# GPU (GV11B) - nouveau with the GV11B bring-up series
+BOARD_VENDOR_KERNEL_MODULES_LOAD += \
+    nouveau
+
 # Tegra hdmi audio
 ifeq ($(TARGET_KERNEL_VERSION),6.12)
 BOARD_VENDOR_KERNEL_MODULES_LOAD += \
