@@ -132,3 +132,12 @@ endif
 # not in git (see .gitignore).
 PRODUCT_COPY_FILES += \
     $(call find-copy-subdir-files,*,device/nvidia/galen/firmware-gv11b,$(TARGET_COPY_OUT_VENDOR)/firmware/nvidia/gv11b)
+
+# Vulkan via NVK. NVK refuses Tegra unless opted in (it is not conformance-tested there); Mesa reads
+# NVK_I_WANT_A_BROKEN_VULKAN_DRIVER from this vendor property on Android. The UI keeps using GL
+# (RenderEngine pinned; HWUI already defaults to GL: ro.hwui.use_vulkan is set empty elsewhere) and no android.hardware.vulkan.* features are declared yet, so only
+# programs that ask for Vulkan explicitly get NVK.
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.hardware.vulkan=nouveau \
+    vendor.mesa.nvk.i.want.a.broken.vulkan.driver=1 \
+    debug.renderengine.backend=skiaglthreaded

@@ -96,3 +96,6 @@ BOARD_VENDOR_SEPOLICY_DIRS += device/nvidia/galen/sepolicy/vendor
 VENDOR_SECURITY_PATCH := 2024-12-05
 
 include device/nvidia/t194-common/BoardConfigCommon.mk
+
+# Vulkan: NVK (Mesa nouveau Vulkan driver) for GV11B; needs Rust in the Mesa build
+BOARD_MESA3D_VULKAN_DRIVERS += nouveau
