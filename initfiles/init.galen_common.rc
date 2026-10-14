@@ -59,3 +59,8 @@ on property:sys.boot_completed=1
 on property:sys.boot_completed=1
     write /proc/sys/vm/extra_free_kbytes 0
     write /proc/sys/vm/min_free_kbytes 16384
+
+# SC7 (deep suspend) never wakes on this board: keep the system out of suspend.
+# Set after boot completes: a lock taken "on boot" was gone again by the time boot finished.
+on property:sys.boot_completed=1
+    write /sys/power/wake_lock bringup
