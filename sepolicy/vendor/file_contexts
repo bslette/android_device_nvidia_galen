@@ -12,6 +12,8 @@
 /dev/block/platform/bus@0/34[06]0000\.mmc/by-name/vendor_boot(_[ab])? 	u:object_r:boot_block_device:s0
 /dev/block/platform/bus@0/34[06]0000\.mmc/by-name/userdata		u:object_r:userdata_block_device:s0
 /dev/block/platform/bus@0/3610000\.usb/by-name/android_data	u:object_r:userdata_block_device:s0
+/dev/block/platform/bus@0/141a0000\.pcie/by-name/android_data	u:object_r:userdata_block_device:s0
+/dev/block/platform/bus@0/141a0000\.pcie/by-name/swap		u:object_r:swap_block_device:s0
 
 # Bootloader updates / boot control
 /dev/block/platform/bus@0/3270000\.spi/mtdblock0			u:object_r:bootloader_block_device:s0

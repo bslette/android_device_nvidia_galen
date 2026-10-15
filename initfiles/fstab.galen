@@ -12,8 +12,12 @@ product                          /product            ext4      ro,barrier=1,disc
 vendor                           /vendor             ext4      ro,barrier=1,discard                                                wait,avb,slotselect,logical,first_stage_mount
 odm                              /odm                ext4      ro,barrier=1,discard                                                wait,avb,slotselect,logical,first_stage_mount
 /dev/block/by-name/misc          /misc               emmc      defaults                                                            defaults
-# /data on the USB SSD (SSK, partition android_data): the SD card stalls Android for seconds
-/dev/block/platform/bus@0/3610000.usb/by-name/android_data /data ext4      noatime,nosuid,nodev,discard,data=ordered,barrier=0,noauto_da_alloc latemount,wait,check,formattable,quota
+# /data on the M.2 NVMe drive (partition android_data). The SD card stalls Android for seconds and
+# the USB SSD that held /data before peaks at 431 MB/s against 4.3 GB/s for the NVMe drive.
+/dev/block/platform/bus@0/141a0000.pcie/by-name/android_data /data ext4      noatime,nosuid,nodev,discard,data=ordered,barrier=0,noauto_da_alloc latemount,wait,check,formattable,quota
+# 16 GiB swap partition on the NVMe drive, shared with Ubuntu (which finds it by PARTLABEL=swap,
+# because fs_mgr runs mkswap on every boot and that changes its UUID)
+/dev/block/platform/bus@0/141a0000.pcie/by-name/swap none           swap      defaults                                                            wait
 /dev/block/by-name/metadata      /metadata           ext4      noatime,nosuid,nodev,discard                                        wait,check,formattable,first_stage_mount
 /devices/platform/tegra-xhci*    auto                vfat      defaults                                                            voldmanaged=usbdrive:auto,encryptable=userdata
 /devices/tegra-ehci*             auto                vfat      defaults                                                            voldmanaged=usbdrive:auto,encryptable=userdata
