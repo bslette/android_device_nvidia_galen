@@ -1,2 +1,5 @@
 # NVIDIA GV11B firmware repacked from L4T R35: not redistributable
 firmware-gv11b/
+
+# llama.cpp NDK build output (build-llama-android.sh), ~50 MB of binaries
+llama/prebuilt/

@@ -136,8 +136,21 @@ PRODUCT_COPY_FILES += \
 # Vulkan via NVK. NVK refuses Tegra unless opted in (it is not conformance-tested there); Mesa reads
 # NVK_I_WANT_A_BROKEN_VULKAN_DRIVER from this vendor property on Android. The UI keeps using GL
 # (RenderEngine pinned; HWUI already defaults to GL: ro.hwui.use_vulkan is set empty elsewhere) and no android.hardware.vulkan.* features are declared yet, so only
-# programs that ask for Vulkan explicitly get NVK.
+# programs that ask for Vulkan explicitly get NVK. Volta tensor cores (VK_KHR_cooperative_matrix)
+# are opt-in in NVK. nouveau.uvmm_sysmem_vol=0 (BoardConfig.mk) maps VM_BIND system memory
+# L2-cacheable, which needs the NVK L2 flushes around every exec; apps cannot read the module
+# parameter under SELinux, so the property turns the flushes on.
 PRODUCT_VENDOR_PROPERTIES += \
     ro.hardware.vulkan=nouveau \
     vendor.mesa.nvk.i.want.a.broken.vulkan.driver=1 \
+    vendor.mesa.nvk.volta.cmat=1 \
+    vendor.mesa.nvk.l2.sysmem.maint=1 \
     debug.renderengine.backend=skiaglthreaded
+
+# llama.cpp with the Vulkan backend (llama/Android.bp), in /system_ext/bin
+PRODUCT_PACKAGES += \
+    llama-bench \
+    llama-cli \
+    llama-perplexity \
+    llama-server \
+    test-backend-ops

@@ -82,7 +82,7 @@ BOARD_KERNEL_IMAGE_NAME       := Image
 endif
 
 # SSK USB SSD (JMicron 7825:a2a4) holding /data: the xHCI host died 3 of 4 boots with UAS + USB3 LPM
-BOARD_KERNEL_CMDLINE          := firmware_class.path=/vendor/firmware cpufreq.default_governor=performance nouveau.atomic=1 cma=512MB usb_storage.quirks=7825:a2a4:u usbcore.quirks=7825:a2a4:k
+BOARD_KERNEL_CMDLINE          := firmware_class.path=/vendor/firmware cpufreq.default_governor=performance nouveau.atomic=1 nouveau.uvmm_sysmem_vol=0 cma=512MB usb_storage.quirks=7825:a2a4:u usbcore.quirks=7825:a2a4:k
 include device/nvidia/galen/modules.mk
 
 # Recovery
