@@ -1,0 +1,54 @@
+//
+// Copyright (C) 2026 The LineageOS Project
+// SPDX-License-Identifier: Apache-2.0
+//
+// Codec2 vendor service with the NVDEC H.264 decoder (c2.rey.avc.decoder).
+// Named like AOSP's sample service so it runs in the mediacodec domain
+// (system/sepolicy/vendor/file_contexts).
+
+cc_binary {
+    name: "android.hardware.media.c2-default-service",
+    vendor: true,
+    relative_install_path: "hw",
+
+    init_rc: ["android.hardware.media.c2-default-service.rc"],
+    vintf_fragments: ["manifest_media_c2_default.xml"],
+
+    defaults: ["libcodec2-aidl-defaults"],
+
+    srcs: [
+        "service.cpp",
+        "C2NvdecAvcDec.cpp",
+        "nvdec/h264dec.c",
+        "nvdec/host1x.c",
+    ],
+    local_include_dirs: ["nvdec"],
+
+    header_libs: [
+        "libsystem_headers",
+    ],
+    shared_libs: [
+        "libavservices_minijail",
+        "libbinder_ndk",
+        "libcodec2_soft_common",
+        "libcutils",
+        "liblog",
+        "libstagefright_foundation",
+    ],
+
+    cflags: ["-Wall"],
+
+    required: [
+        "android.hardware.media.c2-default-seccomp_policy",
+        "media_codecs_c2_rey.xml",
+    ],
+}
+
+// Installed on odm: device/mainline's optional FFmpeg codec module claims
+// vendor/etc/media_codecs_c2.xml, and Codec2 also reads /odm/etc.
+prebuilt_etc {
+    name: "media_codecs_c2_rey.xml",
+    device_specific: true,
+    src: "media_codecs_c2.xml",
+    filename: "media_codecs_c2.xml",
+}

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+     Copyright (C) 2026 The LineageOS Project
+     SPDX-License-Identifier: Apache-2.0
+
+     NVDEC (Tegra194 video decoder) through the upstream tegra-drm UAPI.
+-->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.rey.avc.decoder" type="video/avc" rank="128">
+            <Limit name="size" min="16x16" max="4096x4096" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-65536" />
+            <Limit name="blocks-per-second" range="1-1966080" />
+            <Limit name="bitrate" range="1-120000000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

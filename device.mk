@@ -154,3 +154,7 @@ PRODUCT_PACKAGES += \
     llama-perplexity \
     llama-server \
     test-backend-ops
+
+# Codec2: NVDEC H.264 decoder (codec2/)
+PRODUCT_PACKAGES += \
+    android.hardware.media.c2-default-service
