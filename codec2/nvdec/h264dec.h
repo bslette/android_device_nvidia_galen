@@ -9,26 +9,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "nvdec_common.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct h264dec;
 
-struct h264dec_picture {
-    /* NV12 in Tegra block linear (TBL, 64x8 GOBs, blocks of 2 GOBs) */
-    const uint8_t *luma, *chroma;
-    unsigned pitch;            /* bytes, both planes */
-    unsigned coded_width, coded_height;
-    unsigned crop_left, crop_top, width, height; /* visible rectangle */
-    int poc, period;           /* display order: by period, then poc */
-    uint64_t timestamp;        /* as passed to h264dec_decode() */
-    unsigned mbs_in_error;
-    int surface;               /* engine surface, for h264dec_vic_copy() */
-};
-
-/* Return non-zero to abort decoding. */
-typedef int (*h264dec_picture_cb)(void *opaque, const struct h264dec_picture *pic);
+#define h264dec_picture nvdec_picture
+typedef nvdec_picture_cb h264dec_picture_cb;
 
 /* node: tegra-drm render node; host1x_class: 0xf0 (NVDEC0) or 0xf5 (NVDEC1) */
 struct h264dec *h264dec_create(const char *node, uint32_t host1x_class,

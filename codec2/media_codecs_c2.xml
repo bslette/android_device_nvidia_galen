@@ -17,5 +17,15 @@
             <Limit name="concurrent-instances" max="8" />
             <Attribute name="hardware-accelerated" />
         </MediaCodec>
+        <MediaCodec name="c2.rey.hevc.decoder" type="video/hevc" rank="128">
+            <Limit name="size" min="16x16" max="4096x4096" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="8x8" />
+            <Limit name="block-count" range="1-262144" />
+            <Limit name="blocks-per-second" range="1-7864320" />
+            <Limit name="bitrate" range="1-120000000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
     </Decoders>
 </MediaCodecs>

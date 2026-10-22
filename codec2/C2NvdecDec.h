@@ -11,21 +11,23 @@
 #include <vector>
 
 #include "h264dec.h"
+#include "hevcdec.h"
 
 namespace android {
 
 /*
- * H.264 decoder on the Tegra NVDEC engine (upstream tegra-drm channel UAPI).
- * NVDEC decodes into block-linear surfaces; VIC converts each picture into the
- * NV12 graphic block that goes out (no CPU copy). Pictures are held until
- * display order is known (POC, reorder depth from the SPS).
+ * H.264 and H.265 decoders on the Tegra NVDEC engine (upstream tegra-drm
+ * channel UAPI). NVDEC decodes into block-linear surfaces; VIC converts each
+ * picture into the NV12 graphic block that goes out (no CPU copy). Pictures
+ * are held until display order is known (POC, reorder depth from the SPS).
  */
-class C2NvdecAvcDec : public SimpleC2Component {
+class C2NvdecDec : public SimpleC2Component {
   public:
+    enum Codec { AVC, HEVC };
     class IntfImpl;
 
-    C2NvdecAvcDec(const char *name, c2_node_id_t id, const std::shared_ptr<IntfImpl> &intfImpl);
-    virtual ~C2NvdecAvcDec();
+    C2NvdecDec(const char *name, c2_node_id_t id, Codec codec, const std::shared_ptr<IntfImpl> &intfImpl);
+    virtual ~C2NvdecDec();
 
     // From SimpleC2Component
     c2_status_t onInit() override;
@@ -44,14 +46,19 @@ class C2NvdecAvcDec : public SimpleC2Component {
         std::shared_ptr<C2GraphicBlock> block;
     };
 
-    static int onPicture(void *opaque, const struct h264dec_picture *pic);
-    int handlePicture(const struct h264dec_picture *pic);
+    static int onPicture(void *opaque, const struct nvdec_picture *pic);
+    int handlePicture(const struct nvdec_picture *pic);
+    void resetDecoder();
+    int reorderDepth() const;
+    int vicCopy(const struct nvdec_picture *pic, int fd, size_t size, unsigned pitch, unsigned chromaOffset);
     void outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work);
     void outputOne(Pending p, const std::unique_ptr<C2Work> &work);
     bool updateSize(uint32_t width, uint32_t height, const std::unique_ptr<C2Work> &work);
 
+    const Codec mCodec;
     std::shared_ptr<IntfImpl> mIntf;
-    struct h264dec *mDec = nullptr;
+    struct h264dec *mAvc = nullptr;
+    struct hevcdec *mHevc = nullptr;
     std::vector<Pending> mPending;
     uint32_t mWidth = 0, mHeight = 0;
     int mOutputDelay = -1;
@@ -59,12 +66,15 @@ class C2NvdecAvcDec : public SimpleC2Component {
     bool mSignalledOutputEos = false;
     bool mVicFailed = false;
 
-    // valid while h264dec_decode() runs process()'s work
+    // valid while the decode call runs process()'s work
     const std::unique_ptr<C2Work> *mCurWork = nullptr;
     std::shared_ptr<C2BlockPool> mCurPool;
     bool mCurDecoded = false;
 
-    C2_DO_NOT_COPY(C2NvdecAvcDec);
+    C2_DO_NOT_COPY(C2NvdecDec);
 };
+
+C2ComponentFactory *CreateNvdecDecFactory(std::shared_ptr<C2ReflectorHelper> helper, C2NvdecDec::Codec codec);
+const char *NvdecDecName(C2NvdecDec::Codec codec);
 
 }  // namespace android

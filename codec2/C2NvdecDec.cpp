@@ -5,7 +5,7 @@
  * Parameter interface and work handling follow AOSP's C2SoftAvcDec.
  */
 
-#define LOG_TAG "C2NvdecAvcDec"
+#define LOG_TAG "C2NvdecDec"
 #include <log/log.h>
 
 #include <media/stagefright/foundation/MediaDefs.h>
@@ -18,13 +18,14 @@
 #include <algorithm>
 #include <unistd.h>
 
-#include "C2NvdecAvcDec.h"
+#include "C2NvdecDec.h"
 
 namespace android {
 
 namespace {
 
-constexpr char COMPONENT_NAME[] = "c2.rey.avc.decoder";
+constexpr char kAvcName[] = "c2.rey.avc.decoder";
+constexpr char kHevcName[] = "c2.rey.hevc.decoder";
 constexpr const char *kRenderNode = "/dev/dri/renderD128"; // tegra-drm (host1x)
 constexpr uint32_t kNvdecClass = 0xf0;                     // NVDEC0
 constexpr uint32_t kDefaultOutputDelay = 8;
@@ -33,11 +34,13 @@ constexpr size_t kMinInputBufferSize = 2 * 1024 * 1024;
 
 }  // namespace
 
-class C2NvdecAvcDec::IntfImpl : public SimpleInterface<void>::BaseParams {
+class C2NvdecDec::IntfImpl : public SimpleInterface<void>::BaseParams {
   public:
-    explicit IntfImpl(const std::shared_ptr<C2ReflectorHelper> &helper)
-        : SimpleInterface<void>::BaseParams(helper, COMPONENT_NAME, C2Component::KIND_DECODER,
-                                            C2Component::DOMAIN_VIDEO, MEDIA_MIMETYPE_VIDEO_AVC) {
+    IntfImpl(const std::shared_ptr<C2ReflectorHelper> &helper, Codec codec)
+        : SimpleInterface<void>::BaseParams(helper, codec == HEVC ? kHevcName : kAvcName,
+                                            C2Component::KIND_DECODER, C2Component::DOMAIN_VIDEO,
+                                            codec == HEVC ? MEDIA_MIMETYPE_VIDEO_HEVC
+                                                          : MEDIA_MIMETYPE_VIDEO_AVC) {
         noPrivateBuffers();
         noInputReferences();
         noOutputReferences();
@@ -73,29 +76,55 @@ class C2NvdecAvcDec::IntfImpl : public SimpleInterface<void>::BaseParams {
                              .withSetter(MaxPictureSizeSetter, mSize)
                              .build());
 
-        addParameter(
-                DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
-                        .withDefault(new C2StreamProfileLevelInfo::input(
-                                0u, C2Config::PROFILE_AVC_CONSTRAINED_BASELINE,
-                                C2Config::LEVEL_AVC_5_1))
-                        .withFields({C2F(mProfileLevel, profile)
-                                             .oneOf({C2Config::PROFILE_AVC_CONSTRAINED_BASELINE,
-                                                     C2Config::PROFILE_AVC_BASELINE,
-                                                     C2Config::PROFILE_AVC_MAIN,
-                                                     C2Config::PROFILE_AVC_CONSTRAINED_HIGH,
-                                                     C2Config::PROFILE_AVC_PROGRESSIVE_HIGH,
-                                                     C2Config::PROFILE_AVC_HIGH}),
-                                     C2F(mProfileLevel, level)
-                                             .oneOf({C2Config::LEVEL_AVC_1, C2Config::LEVEL_AVC_1B,
-                                                     C2Config::LEVEL_AVC_1_1, C2Config::LEVEL_AVC_1_2,
-                                                     C2Config::LEVEL_AVC_1_3, C2Config::LEVEL_AVC_2,
-                                                     C2Config::LEVEL_AVC_2_1, C2Config::LEVEL_AVC_2_2,
-                                                     C2Config::LEVEL_AVC_3, C2Config::LEVEL_AVC_3_1,
-                                                     C2Config::LEVEL_AVC_3_2, C2Config::LEVEL_AVC_4,
-                                                     C2Config::LEVEL_AVC_4_1, C2Config::LEVEL_AVC_4_2,
-                                                     C2Config::LEVEL_AVC_5, C2Config::LEVEL_AVC_5_1})})
-                        .withSetter(ProfileLevelSetter, mSize)
-                        .build());
+        if (codec == HEVC) {
+            addParameter(
+                    DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
+                            .withDefault(new C2StreamProfileLevelInfo::input(
+                                    0u, C2Config::PROFILE_HEVC_MAIN, C2Config::LEVEL_HEVC_MAIN_5_1))
+                            .withFields({C2F(mProfileLevel, profile)
+                                                 .oneOf({C2Config::PROFILE_HEVC_MAIN,
+                                                         C2Config::PROFILE_HEVC_MAIN_STILL}),
+                                         C2F(mProfileLevel, level)
+                                                 .oneOf({C2Config::LEVEL_HEVC_MAIN_1,
+                                                         C2Config::LEVEL_HEVC_MAIN_2,
+                                                         C2Config::LEVEL_HEVC_MAIN_2_1,
+                                                         C2Config::LEVEL_HEVC_MAIN_3,
+                                                         C2Config::LEVEL_HEVC_MAIN_3_1,
+                                                         C2Config::LEVEL_HEVC_MAIN_4,
+                                                         C2Config::LEVEL_HEVC_MAIN_4_1,
+                                                         C2Config::LEVEL_HEVC_MAIN_5,
+                                                         C2Config::LEVEL_HEVC_MAIN_5_1,
+                                                         C2Config::LEVEL_HEVC_HIGH_4,
+                                                         C2Config::LEVEL_HEVC_HIGH_4_1,
+                                                         C2Config::LEVEL_HEVC_HIGH_5,
+                                                         C2Config::LEVEL_HEVC_HIGH_5_1})})
+                            .withSetter(ProfileLevelSetter, mSize)
+                            .build());
+        } else {
+            addParameter(
+                    DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
+                            .withDefault(new C2StreamProfileLevelInfo::input(
+                                    0u, C2Config::PROFILE_AVC_CONSTRAINED_BASELINE,
+                                    C2Config::LEVEL_AVC_5_1))
+                            .withFields({C2F(mProfileLevel, profile)
+                                                 .oneOf({C2Config::PROFILE_AVC_CONSTRAINED_BASELINE,
+                                                         C2Config::PROFILE_AVC_BASELINE,
+                                                         C2Config::PROFILE_AVC_MAIN,
+                                                         C2Config::PROFILE_AVC_CONSTRAINED_HIGH,
+                                                         C2Config::PROFILE_AVC_PROGRESSIVE_HIGH,
+                                                         C2Config::PROFILE_AVC_HIGH}),
+                                         C2F(mProfileLevel, level)
+                                                 .oneOf({C2Config::LEVEL_AVC_1, C2Config::LEVEL_AVC_1B,
+                                                         C2Config::LEVEL_AVC_1_1, C2Config::LEVEL_AVC_1_2,
+                                                         C2Config::LEVEL_AVC_1_3, C2Config::LEVEL_AVC_2,
+                                                         C2Config::LEVEL_AVC_2_1, C2Config::LEVEL_AVC_2_2,
+                                                         C2Config::LEVEL_AVC_3, C2Config::LEVEL_AVC_3_1,
+                                                         C2Config::LEVEL_AVC_3_2, C2Config::LEVEL_AVC_4,
+                                                         C2Config::LEVEL_AVC_4_1, C2Config::LEVEL_AVC_4_2,
+                                                         C2Config::LEVEL_AVC_5, C2Config::LEVEL_AVC_5_1})})
+                            .withSetter(ProfileLevelSetter, mSize)
+                            .build());
+        }
 
         addParameter(DefineParam(mMaxInputSize, C2_PARAMKEY_INPUT_MAX_BUFFER_SIZE)
                              .withDefault(new C2StreamMaxBufferSizeInfo::input(0u, kMinInputBufferSize))
@@ -222,45 +251,66 @@ class C2NvdecAvcDec::IntfImpl : public SimpleInterface<void>::BaseParams {
     std::shared_ptr<C2StreamPixelFormatInfo::output> mPixelFormat;
 };
 
-C2NvdecAvcDec::C2NvdecAvcDec(const char *name, c2_node_id_t id,
-                             const std::shared_ptr<IntfImpl> &intfImpl)
+C2NvdecDec::C2NvdecDec(const char *name, c2_node_id_t id, Codec codec,
+                       const std::shared_ptr<IntfImpl> &intfImpl)
     : SimpleC2Component(std::make_shared<SimpleInterface<IntfImpl>>(name, id, intfImpl)),
+      mCodec(codec),
       mIntf(intfImpl) {}
 
-C2NvdecAvcDec::~C2NvdecAvcDec() {
+C2NvdecDec::~C2NvdecDec() {
     onRelease();
 }
 
-c2_status_t C2NvdecAvcDec::onInit() {
-    mDec = h264dec_create(kRenderNode, kNvdecClass, onPicture, this);
-    if (!mDec) {
+c2_status_t C2NvdecDec::onInit() {
+    if (mCodec == HEVC)
+        mHevc = hevcdec_create(kRenderNode, kNvdecClass, onPicture, this);
+    else
+        mAvc = h264dec_create(kRenderNode, kNvdecClass, onPicture, this);
+    if (!mAvc && !mHevc) {
         ALOGE("cannot open NVDEC on %s", kRenderNode);
         return C2_CORRUPTED;
     }
     return C2_OK;
 }
 
-c2_status_t C2NvdecAvcDec::onStop() {
+void C2NvdecDec::resetDecoder() {
+    if (mAvc) h264dec_reset(mAvc);
+    if (mHevc) hevcdec_reset(mHevc);
+}
+
+int C2NvdecDec::reorderDepth() const {
+    return mHevc ? hevcdec_reorder_depth(mHevc) : h264dec_reorder_depth(mAvc);
+}
+
+int C2NvdecDec::vicCopy(const struct nvdec_picture *pic, int fd, size_t size, unsigned pitch,
+                        unsigned chromaOffset) {
+    return mHevc ? hevcdec_vic_copy(mHevc, pic, fd, size, pitch, chromaOffset)
+                 : h264dec_vic_copy(mAvc, pic, fd, size, pitch, chromaOffset);
+}
+
+c2_status_t C2NvdecDec::onStop() {
     mPending.clear();
-    if (mDec) h264dec_reset(mDec);
+    resetDecoder();
     mSignalledError = false;
     mSignalledOutputEos = false;
     return C2_OK;
 }
 
-void C2NvdecAvcDec::onReset() {
+void C2NvdecDec::onReset() {
     (void)onStop();
 }
 
-void C2NvdecAvcDec::onRelease() {
+void C2NvdecDec::onRelease() {
     mPending.clear();
-    h264dec_destroy(mDec);
-    mDec = nullptr;
+    h264dec_destroy(mAvc);
+    hevcdec_destroy(mHevc);
+    mAvc = nullptr;
+    mHevc = nullptr;
 }
 
-c2_status_t C2NvdecAvcDec::onFlush_sm() {
+c2_status_t C2NvdecDec::onFlush_sm() {
     mPending.clear();
-    if (mDec) h264dec_reset(mDec);
+    resetDecoder();
     mSignalledOutputEos = false;
     return C2_OK;
 }
@@ -274,7 +324,7 @@ static void fillEmptyWork(const std::unique_ptr<C2Work> &work) {
     work->workletsProcessed = 1u;
 }
 
-bool C2NvdecAvcDec::updateSize(uint32_t width, uint32_t height, const std::unique_ptr<C2Work> &work) {
+bool C2NvdecDec::updateSize(uint32_t width, uint32_t height, const std::unique_ptr<C2Work> &work) {
     if (width == mWidth && height == mHeight) return true;
     C2StreamPictureSizeInfo::output size(0u, width, height);
     std::vector<std::unique_ptr<C2SettingResult>> failures;
@@ -288,11 +338,11 @@ bool C2NvdecAvcDec::updateSize(uint32_t width, uint32_t height, const std::uniqu
     return true;
 }
 
-int C2NvdecAvcDec::onPicture(void *opaque, const struct h264dec_picture *pic) {
-    return static_cast<C2NvdecAvcDec *>(opaque)->handlePicture(pic);
+int C2NvdecDec::onPicture(void *opaque, const struct nvdec_picture *pic) {
+    return static_cast<C2NvdecDec *>(opaque)->handlePicture(pic);
 }
 
-int C2NvdecAvcDec::handlePicture(const struct h264dec_picture *pic) {
+int C2NvdecDec::handlePicture(const struct nvdec_picture *pic) {
     const std::unique_ptr<C2Work> &work = *mCurWork;
     mCurDecoded = true;
     if (pic->mbs_in_error) ALOGW("picture %d: %u macroblocks in error", pic->poc, pic->mbs_in_error);
@@ -327,7 +377,7 @@ int C2NvdecAvcDec::handlePicture(const struct h264dec_picture *pic) {
         int fd = handle->numFds > 0 ? handle->data[0] : -1;
         off_t size = fd >= 0 ? lseek(fd, 0, SEEK_END) : -1;
         if (size > 0) {
-            int verr = h264dec_vic_copy(mDec, pic, fd, size, yStride, u - y);
+            int verr = vicCopy(pic, fd, size, yStride, u - y);
             if (verr == 0) {
                 done = true;
             } else {
@@ -336,10 +386,10 @@ int C2NvdecAvcDec::handlePicture(const struct h264dec_picture *pic) {
             }
         }
     }
-    if (!done) h264dec_copy_out(pic, y, yStride, u, v, uvStride, uvStep);
+    if (!done) nvdec_copy_out(pic, y, yStride, u, v, uvStride, uvStep);
 
     mPending.push_back({pic->period, pic->poc, pic->timestamp, std::move(block)});
-    int depth = h264dec_reorder_depth(mDec);
+    int depth = reorderDepth();
     if (depth >= 0 && depth != mOutputDelay) {
         C2PortActualDelayTuning::output outputDelay(std::min<int>(depth + 1, kMaxOutputDelay));
         std::vector<std::unique_ptr<C2SettingResult>> failures;
@@ -351,7 +401,7 @@ int C2NvdecAvcDec::handlePicture(const struct h264dec_picture *pic) {
     return 0;
 }
 
-void C2NvdecAvcDec::outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work) {
+void C2NvdecDec::outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work) {
     while (mPending.size() > keep) {
         auto first = std::min_element(mPending.begin(), mPending.end(), [](const Pending &a, const Pending &b) {
             return a.period != b.period ? a.period < b.period : a.poc < b.poc;
@@ -362,7 +412,7 @@ void C2NvdecAvcDec::outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work)
     }
 }
 
-void C2NvdecAvcDec::outputOne(Pending p, const std::unique_ptr<C2Work> &work) {
+void C2NvdecDec::outputOne(Pending p, const std::unique_ptr<C2Work> &work) {
     std::shared_ptr<C2Buffer> buffer = createGraphicBuffer(std::move(p.block), C2Rect(mWidth, mHeight));
     {
         IntfImpl::Lock lock = mIntf->lock();
@@ -395,7 +445,7 @@ void C2NvdecAvcDec::outputOne(Pending p, const std::unique_ptr<C2Work> &work) {
     }
 }
 
-void C2NvdecAvcDec::process(const std::unique_ptr<C2Work> &work,
+void C2NvdecDec::process(const std::unique_ptr<C2Work> &work,
                             const std::shared_ptr<C2BlockPool> &pool) {
     work->result = C2_OK;
     work->workletsProcessed = 0u;
@@ -416,8 +466,9 @@ void C2NvdecAvcDec::process(const std::unique_ptr<C2Work> &work,
         }
         mCurWork = &work;
         mCurPool = pool;
-        int err = h264dec_decode(mDec, rView.data(), rView.capacity(),
-                                 work->input.ordinal.frameIndex.peeku());
+        uint64_t ts = work->input.ordinal.frameIndex.peeku();
+        int err = mHevc ? hevcdec_decode(mHevc, rView.data(), rView.capacity(), ts)
+                        : h264dec_decode(mAvc, rView.data(), rView.capacity(), ts);
         mCurWork = nullptr;
         mCurPool.reset();
         if (err == -ENOTSUP || err == -ECANCELED || err == -ENOMEM || err == -ETIMEDOUT) {
@@ -454,22 +505,23 @@ void C2NvdecAvcDec::process(const std::unique_ptr<C2Work> &work,
     work->input.buffers.clear();
 }
 
-c2_status_t C2NvdecAvcDec::drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool> & /* pool */) {
+c2_status_t C2NvdecDec::drain(uint32_t drainMode, const std::shared_ptr<C2BlockPool> & /* pool */) {
     if (drainMode == NO_DRAIN) return C2_OK;
     if (drainMode == DRAIN_CHAIN) return C2_OMITTED;
     outputUpTo(0, nullptr);
     return C2_OK;
 }
 
-class C2NvdecAvcDecFactory : public C2ComponentFactory {
+class C2NvdecDecFactory : public C2ComponentFactory {
   public:
-    explicit C2NvdecAvcDecFactory(std::shared_ptr<C2ReflectorHelper> helper)
-        : mHelper(std::move(helper)) {}
+    C2NvdecDecFactory(std::shared_ptr<C2ReflectorHelper> helper, C2NvdecDec::Codec codec)
+        : mHelper(std::move(helper)), mCodec(codec) {}
 
     c2_status_t createComponent(c2_node_id_t id, std::shared_ptr<C2Component> *const component,
                                 std::function<void(C2Component *)> deleter) override {
         *component = std::shared_ptr<C2Component>(
-                new C2NvdecAvcDec(COMPONENT_NAME, id, std::make_shared<C2NvdecAvcDec::IntfImpl>(mHelper)),
+                new C2NvdecDec(NvdecDecName(mCodec), id, mCodec,
+                               std::make_shared<C2NvdecDec::IntfImpl>(mHelper, mCodec)),
                 deleter);
         return C2_OK;
     }
@@ -477,22 +529,23 @@ class C2NvdecAvcDecFactory : public C2ComponentFactory {
     c2_status_t createInterface(c2_node_id_t id, std::shared_ptr<C2ComponentInterface> *const interface,
                                 std::function<void(C2ComponentInterface *)> deleter) override {
         *interface = std::shared_ptr<C2ComponentInterface>(
-                new SimpleInterface<C2NvdecAvcDec::IntfImpl>(
-                        COMPONENT_NAME, id, std::make_shared<C2NvdecAvcDec::IntfImpl>(mHelper)),
+                new SimpleInterface<C2NvdecDec::IntfImpl>(
+                        NvdecDecName(mCodec), id, std::make_shared<C2NvdecDec::IntfImpl>(mHelper, mCodec)),
                 deleter);
         return C2_OK;
     }
 
   private:
     std::shared_ptr<C2ReflectorHelper> mHelper;
+    C2NvdecDec::Codec mCodec;
 };
 
-C2ComponentFactory *CreateNvdecAvcDecFactory(std::shared_ptr<C2ReflectorHelper> helper) {
-    return new C2NvdecAvcDecFactory(std::move(helper));
+C2ComponentFactory *CreateNvdecDecFactory(std::shared_ptr<C2ReflectorHelper> helper, C2NvdecDec::Codec codec) {
+    return new C2NvdecDecFactory(std::move(helper), codec);
 }
 
-const char *NvdecAvcDecName() {
-    return COMPONENT_NAME;
+const char *NvdecDecName(C2NvdecDec::Codec codec) {
+    return codec == C2NvdecDec::HEVC ? kHevcName : kAvcName;
 }
 
 }  // namespace android

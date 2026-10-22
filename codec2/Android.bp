@@ -2,7 +2,8 @@
 // Copyright (C) 2026 The LineageOS Project
 // SPDX-License-Identifier: Apache-2.0
 //
-// Codec2 vendor service with the NVDEC H.264 decoder (c2.rey.avc.decoder).
+// Codec2 vendor service with the NVDEC H.264 and H.265 decoders
+// (c2.rey.avc.decoder, c2.rey.hevc.decoder).
 // Named like AOSP's sample service so it runs in the mediacodec domain
 // (system/sepolicy/vendor/file_contexts).
 
@@ -18,9 +19,11 @@ cc_binary {
 
     srcs: [
         "service.cpp",
-        "C2NvdecAvcDec.cpp",
+        "C2NvdecDec.cpp",
         "nvdec/h264dec.c",
+        "nvdec/hevcdec.c",
         "nvdec/host1x.c",
+        "nvdec/nvdec_common.c",
     ],
     local_include_dirs: ["nvdec"],
 

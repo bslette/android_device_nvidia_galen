@@ -7,14 +7,11 @@
  */
 #include "h264dec.h"
 #include "host1x.h"
+#include "nvdec_bits.h"
 #include "nvdec_drv.h"
-#include "vic42.h"
 
 #include <errno.h>
 #include <stdio.h>
-#if defined(__aarch64__)
-#include <arm_neon.h>
-#endif
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -45,44 +42,10 @@
 #define CODEC_H264 3
 #define EXECUTE_AWAKEN (1u << 8)
 
-#define NSURF 17 /* picture slots the engine addresses */
+#define NSURF NVDEC_NSURF
 #define MAX_SLICES 255
 #define BITSTREAM_SIZE (8u << 20)
 #define ALIGN(v, a) (((v) + (a) - 1) / (a) * (a))
-
-/* ---- bit reader over RBSP; overruns set err and read zeros ---- */
-struct br { const uint8_t *p; size_t n, pos; int err; };
-
-static unsigned u1(struct br *b) {
-    if (b->pos >= b->n * 8) { b->err = 1; return 0; }
-    unsigned v = (b->p[b->pos >> 3] >> (7 - (b->pos & 7))) & 1;
-    b->pos++;
-    return v;
-}
-static unsigned un(struct br *b, int n) { unsigned v = 0; while (n--) v = (v << 1) | u1(b); return v; }
-static unsigned ue(struct br *b) {
-    int z = 0;
-    while (!u1(b)) {
-        if (b->err || ++z > 31) { b->err = 1; return 0; }
-    }
-    return ((1u << z) - 1) + un(b, z);
-}
-static int se(struct br *b) { unsigned k = ue(b); return (k & 1) ? (int)((k + 1) / 2) : -(int)(k / 2); }
-static int more_rbsp_data(struct br *b) {
-    size_t last = b->n * 8;
-    while (last > 0 && !((b->p[(last - 1) >> 3] >> (7 - ((last - 1) & 7))) & 1)) last--;
-    return last > 0 && b->pos < last - 1;
-}
-
-static size_t unescape(const uint8_t *in, size_t n, uint8_t *out) {
-    size_t o = 0, z = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (z >= 2 && in[i] == 3) { z = 0; continue; }
-        z = in[i] == 0 ? z + 1 : 0;
-        out[o++] = in[i];
-    }
-    return o;
-}
 
 /* ---- parameter sets ---- */
 struct sps {
@@ -287,30 +250,12 @@ struct h264dec {
     uint8_t *staging; /* cached copy of the surface being returned */
     size_t staging_size;
     /* VIC: block-linear surfaces to pitch-linear output buffers */
-    struct t_dev vic;
-    int vic_ok;
-    struct t_bo vic_config, vic_filter, vic_surf[NSURF];
+    struct nvdec_vic vic;
 };
-
-#define VIC_APP_ID                       0x200
-#define VIC_EXECUTE                      0x300
-#define VIC_SET_CONTROL_PARAMS           0x704
-#define VIC_SET_CONFIG_STRUCT_OFFSET     0x708
-#define VIC_SET_FILTER_STRUCT_OFFSET     0x70c
-#define VIC_SET_OUTPUT_LUMA_OFFSET       0x720
-#define VIC_SET_OUTPUT_CHROMA_U_OFFSET   0x724
-#define VIC_SET_SURFACE0_LUMA_OFFSET     0x1200
-#define VIC_SET_SURFACE0_CHROMA_U_OFFSET 0x1204
-#define VIC_PIXEL_FORMAT_Y8_U8V8_N420    67 /* NV12 */
-#define VIC_BLK_KIND_PITCH               0
-#define VIC_BLK_KIND_GENERIC_16Bx2       1
-#define VIC_CACHE_WIDTH_32Bx8            1
-#define HOST1X_CLASS_VIC                 0x5d
 
 static void free_buffers(struct h264dec *d) {
     struct t_bo *all[] = { &d->bits, &d->setup, &d->offsets, &d->status, &d->coloc, &d->mbhist, &d->history };
-    if (d->vic_ok)
-        for (int i = 0; i < NSURF; i++) t_bo_unmap_from(&d->vic, &d->vic_surf[i]);
+    nvdec_vic_unmap(&d->vic);
     for (int i = 0; i < NSURF; i++) t_bo_free(&d->dev, &d->surf[i]);
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) t_bo_free(&d->dev, all[i]);
     d->alloc_w = d->alloc_h = 0;
@@ -334,9 +279,7 @@ static int alloc_buffers(struct h264dec *d, const struct sps *sp) {
         t_bo_new(&d->dev, &d->setup, sizeof(nvdec_h264_pic_s)) ||
         t_bo_new(&d->dev, &d->offsets, 4096) || t_bo_new(&d->dev, &d->status, 4096))
         return -ENOMEM;
-    if (d->vic_ok)
-        for (int i = 0; i < NSURF; i++)
-            if (t_bo_map_into(&d->vic, &d->surf[i], &d->vic_surf[i])) return -ENOMEM;
+    if (nvdec_vic_map(&d->vic, d->surf, d->luma_size)) return -ENOMEM;
     d->alloc_w = sp->width_mbs;
     d->alloc_h = sp->height_map_units;
     return 0;
@@ -542,13 +485,13 @@ static int decode_picture(struct h264dec *d) {
      * the copy. With VIC the CPU does not read the picture at all. */
     size_t surf_size = d->surf[cur].size;
     const uint8_t *pix = d->surf[cur].ptr;
-    if (!d->vic_ok && d->staging_size < surf_size) {
+    if (!d->vic.ok && d->staging_size < surf_size) {
         free(d->staging);
         d->staging = malloc(surf_size);
         d->staging_size = d->staging ? surf_size : 0;
         if (!d->staging) return -ENOMEM;
     }
-    if (!d->vic_ok) {
+    if (!d->vic.ok) {
         memcpy(d->staging, d->surf[cur].ptr, surf_size);
         pix = d->staging;
     }
@@ -586,13 +529,8 @@ struct h264dec *h264dec_create(const char *node, uint32_t host1x_class, h264dec_
         return NULL;
     }
     /* VIC is optional: without it callers copy out on the CPU */
-    if (!t_channel_open(&d->dev, &d->vic, HOST1X_CLASS_VIC)) {
-        if (!t_bo_new(&d->vic, &d->vic_config, sizeof(ConfigStruct)) &&
-            !t_bo_new(&d->vic, &d->vic_filter, 16384))
-            d->vic_ok = 1;
-        else
-            DEC_WARN("VIC buffers unavailable, using CPU copies");
-    }
+    nvdec_vic_open(&d->dev, &d->vic);
+    if (!d->vic.ok) DEC_WARN("VIC unavailable, using CPU copies");
     return d;
 }
 
@@ -600,11 +538,7 @@ void h264dec_destroy(struct h264dec *d) {
     if (!d) return;
     if (d->dev.fd > 0) {
         free_buffers(d);
-        if (d->vic.fd > 0) {
-            t_bo_free(&d->vic, &d->vic_config);
-            t_bo_free(&d->vic, &d->vic_filter);
-            t_close(&d->vic);
-        }
+        nvdec_vic_close(&d->vic);
         t_close(&d->dev);
     }
     free(d->pic);
@@ -681,117 +615,10 @@ int h264dec_decode(struct h264dec *d, const uint8_t *in, size_t n, uint64_t time
 
 int h264dec_vic_copy(struct h264dec *d, const struct h264dec_picture *pic, int dmabuf_fd,
                      size_t dmabuf_size, unsigned pitch, unsigned chroma_offset) {
-    if (!d->vic_ok) return -ENODEV;
-    if (pitch % 256 || chroma_offset % 256 || chroma_offset < pitch * pic->height ||
-        (size_t)chroma_offset + pitch * pic->height / 2 > dmabuf_size)
-        return -EINVAL;
-    struct t_bo dst;
-    if (t_bo_import(&d->vic, dmabuf_fd, dmabuf_size, &dst)) return -EIO;
-
-    ConfigStruct *c = d->vic_config.ptr;
-    memset(c, 0, sizeof(*c));
-    c->outputConfig.TargetRectRight = pic->width - 1;
-    c->outputConfig.TargetRectBottom = pic->height - 1;
-    c->outputConfig.BackgroundAlpha = 255;
-    c->outputSurfaceConfig.OutPixelFormat = VIC_PIXEL_FORMAT_Y8_U8V8_N420;
-    c->outputSurfaceConfig.OutBlkKind = VIC_BLK_KIND_PITCH;
-    c->outputSurfaceConfig.OutSurfaceWidth = pic->width - 1;
-    c->outputSurfaceConfig.OutSurfaceHeight = pic->height - 1;
-    c->outputSurfaceConfig.OutLumaWidth = pitch - 1;
-    c->outputSurfaceConfig.OutLumaHeight = pic->height - 1;
-    c->outputSurfaceConfig.OutChromaWidth = pitch / 2 - 1;
-    c->outputSurfaceConfig.OutChromaHeight = pic->height / 2 - 1;
-
-    SlotConfig *slot = &c->slotStruct[0].slotConfig;
-    slot->SlotEnable = 1;
-    slot->CurrentFieldEnable = 1;
-    slot->PlanarAlpha = 255;
-    slot->ConstantAlpha = 1;
-    slot->SourceRectLeft = pic->crop_left << 16;
-    slot->SourceRectRight = (pic->crop_left + pic->width - 1) << 16;
-    slot->SourceRectTop = pic->crop_top << 16;
-    slot->SourceRectBottom = (pic->crop_top + pic->height - 1) << 16;
-    slot->DestRectRight = pic->width - 1;
-    slot->DestRectBottom = pic->height - 1;
-    slot->SoftClampHigh = 1023;
-
-    SlotSurfaceConfig *surf = &c->slotStruct[0].slotSurfaceConfig;
-    surf->SlotPixelFormat = VIC_PIXEL_FORMAT_Y8_U8V8_N420;
-    surf->SlotChromaLocHORIZ = 1;
-    surf->SlotChromaLocVert = 1;
-    surf->SlotBlkKind = VIC_BLK_KIND_GENERIC_16Bx2;
-    surf->SlotBlkHeight = 1; /* blocks of two GOBs, as NVDEC wrote them */
-    surf->SlotCacheWidth = VIC_CACHE_WIDTH_32Bx8;
-    surf->SlotSurfaceWidth = pic->coded_width - 1;
-    surf->SlotSurfaceHeight = pic->coded_height - 1;
-    surf->SlotLumaWidth = pic->pitch - 1;
-    surf->SlotLumaHeight = pic->coded_height - 1;
-    surf->SlotChromaWidth = pic->pitch / 2 - 1;
-    surf->SlotChromaHeight = pic->coded_height / 2 - 1;
-
-    struct t_job j;
-    t_job_init(&j);
-    t_mthd(&j, VIC_APP_ID, 1);
-    t_mthd(&j, VIC_SET_CONTROL_PARAMS, (sizeof(ConfigStruct) / 16) << 16);
-    t_mthd_addr(&j, VIC_SET_CONFIG_STRUCT_OFFSET, &d->vic_config, 0);
-    t_mthd_addr(&j, VIC_SET_FILTER_STRUCT_OFFSET, &d->vic_filter, 0);
-    t_mthd_addr(&j, VIC_SET_OUTPUT_LUMA_OFFSET, &dst, 0);
-    t_mthd_addr(&j, VIC_SET_OUTPUT_CHROMA_U_OFFSET, &dst, chroma_offset);
-    t_mthd_addr(&j, VIC_SET_SURFACE0_LUMA_OFFSET, &d->vic_surf[pic->surface], 0);
-    t_mthd_addr(&j, VIC_SET_SURFACE0_CHROMA_U_OFFSET, &d->vic_surf[pic->surface], d->luma_size);
-    t_mthd(&j, VIC_EXECUTE, EXECUTE_AWAKEN);
-    t_syncpt_incr(&j, &d->vic);
-    int err = t_submit_wait(&d->vic, &j, 1000, NULL) ? -ETIMEDOUT : 0;
-    t_bo_release_import(&d->vic, &dst);
-    return err;
-}
-
-/* TBL: GOB of 64 B x 8 rows in 16Bx2 sectors, blocks of 2 GOBs stacked vertically. */
-static inline size_t tbl_offset(unsigned pitch, unsigned x, unsigned y) {
-    size_t block = (size_t)(y / 16) * (pitch / 64) + x / 64;
-    return block * 1024 + ((y % 16) / 8) * 512 + ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 +
-           ((x % 32) / 16) * 32 + (y % 2) * 16;
+    return nvdec_vic_copy(&d->vic, pic, dmabuf_fd, dmabuf_size, pitch, chroma_offset);
 }
 
 void h264dec_copy_out(const struct h264dec_picture *pic, uint8_t *y, int y_stride,
                       uint8_t *u, uint8_t *v, int uv_stride, int uv_step) {
-    unsigned x0 = pic->crop_left, y0 = pic->crop_top, w = pic->width, h = pic->height;
-    for (unsigned row = 0; row < h; row++) {
-        uint8_t *dst = y + (size_t)row * y_stride;
-        unsigned sy = y0 + row, x = 0;
-        while (x < w) { /* 16-byte sector runs */
-            unsigned sx = x0 + x, n = 16 - (sx % 16);
-            if (n > w - x) n = w - x;
-            memcpy(dst + x, pic->luma + tbl_offset(pic->pitch, sx & ~15u, sy) + (sx % 16), n);
-            x += n;
-        }
-    }
-    for (unsigned row = 0; row < h / 2; row++) {
-        uint8_t *du = u + (size_t)row * uv_stride, *dv = v + (size_t)row * uv_stride;
-        unsigned sy = y0 / 2 + row, x = 0;
-#if defined(__aarch64__)
-        /* whole 16-byte sectors (8 UV pairs) when the crop is sector aligned */
-        if (x0 % 16 == 0)
-            for (; x + 8 <= w / 2; x += 8) {
-                uint8x8x2_t uv = vld2_u8(pic->chroma + tbl_offset(pic->pitch, x0 + 2 * x, sy));
-                if (uv_step == 1) {
-                    vst1_u8(du + x, uv.val[0]);
-                    vst1_u8(dv + x, uv.val[1]);
-                } else {
-                    for (int k = 0; k < 8; k++) {
-                        du[(x + k) * uv_step] = vget_lane_u8(uv.val[0], 0);
-                        dv[(x + k) * uv_step] = vget_lane_u8(uv.val[1], 0);
-                        uv.val[0] = vext_u8(uv.val[0], uv.val[0], 1);
-                        uv.val[1] = vext_u8(uv.val[1], uv.val[1], 1);
-                    }
-                }
-            }
-#endif
-        for (; x < w / 2; x++) {
-            unsigned sx = x0 + 2 * x; /* byte offset of the U sample in the NV12 row */
-            const uint8_t *src = pic->chroma + tbl_offset(pic->pitch, sx & ~15u, sy) + (sx % 16);
-            du[x * uv_step] = src[0];
-            dv[x * uv_step] = src[1];
-        }
-    }
+    nvdec_copy_out(pic, y, y_stride, u, v, uv_stride, uv_step);
 }

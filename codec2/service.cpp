@@ -2,7 +2,7 @@
  * Copyright (C) 2026 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  *
- * Codec2 IComponentStore "default" for galen: the NVDEC H.264 decoder.
+ * Codec2 IComponentStore "default" for galen: the NVDEC H.264 and H.265 decoders.
  * Based on AOSP's sample vendor service (frameworks/av/media/codec2/hal/services).
  */
 
@@ -21,12 +21,13 @@
 #include <codec2/aidl/ComponentStore.h>
 
 #include <atomic>
+#include <utility>
+#include <vector>
 #include <signal.h>
 
-namespace android {
-C2ComponentFactory *CreateNvdecAvcDecFactory(std::shared_ptr<C2ReflectorHelper> helper);
-const char *NvdecAvcDecName();
-}  // namespace android
+#include "C2NvdecDec.h"
+
+using android::C2NvdecDec;
 
 static constexpr char kBaseSeccompPolicyPath[] =
         "/vendor/etc/seccomp_policy/android.hardware.media.c2-default-seccomp_policy";
@@ -38,35 +39,42 @@ class StoreImpl : public C2ComponentStore {
   public:
     StoreImpl()
         : mReflectorHelper(std::make_shared<C2ReflectorHelper>()),
-          mInterface(mReflectorHelper),
-          mFactory(android::CreateNvdecAvcDecFactory(mReflectorHelper)) {
-        auto traits = std::make_shared<C2Component::Traits>();
-        traits->name = android::NvdecAvcDecName();
-        traits->domain = C2Component::DOMAIN_VIDEO;
-        traits->kind = C2Component::KIND_DECODER;
-        traits->rank = 0x80; // ahead of the software decoders (0x200)
-        traits->mediaType = "video/avc";
-        traits->owner = "default";
-        mTraits = traits;
+          mInterface(mReflectorHelper) {
+        for (auto [codec, mediaType] : {std::pair{C2NvdecDec::AVC, "video/avc"},
+                                        std::pair{C2NvdecDec::HEVC, "video/hevc"}}) {
+            auto traits = std::make_shared<C2Component::Traits>();
+            traits->name = android::NvdecDecName(codec);
+            traits->domain = C2Component::DOMAIN_VIDEO;
+            traits->kind = C2Component::KIND_DECODER;
+            traits->rank = 0x80; // ahead of the software decoders (0x200)
+            traits->mediaType = mediaType;
+            traits->owner = "default";
+            mComponents.push_back(
+                    {traits, std::unique_ptr<C2ComponentFactory>(
+                                     android::CreateNvdecDecFactory(mReflectorHelper, codec))});
+        }
     }
 
     C2String getName() const override { return "default"; }
 
     c2_status_t createComponent(C2String name, std::shared_ptr<C2Component> *const component) override {
-        if (name != mTraits->name) return C2_NOT_FOUND;
-        return mFactory->createComponent(mNodeId++, component,
-                                         std::default_delete<C2Component>());
+        C2ComponentFactory *factory = find(name);
+        if (!factory) return C2_NOT_FOUND;
+        return factory->createComponent(mNodeId++, component, std::default_delete<C2Component>());
     }
 
     c2_status_t createInterface(C2String name,
                                 std::shared_ptr<C2ComponentInterface> *const interface) override {
-        if (name != mTraits->name) return C2_NOT_FOUND;
-        return mFactory->createInterface(mNodeId++, interface,
-                                         std::default_delete<C2ComponentInterface>());
+        C2ComponentFactory *factory = find(name);
+        if (!factory) return C2_NOT_FOUND;
+        return factory->createInterface(mNodeId++, interface,
+                                        std::default_delete<C2ComponentInterface>());
     }
 
     std::vector<std::shared_ptr<const C2Component::Traits>> listComponents() override {
-        return {mTraits};
+        std::vector<std::shared_ptr<const C2Component::Traits>> list;
+        for (const auto &c : mComponents) list.push_back(c.traits);
+        return list;
     }
 
     c2_status_t copyBuffer(std::shared_ptr<C2GraphicBuffer>, std::shared_ptr<C2GraphicBuffer>) override {
@@ -96,6 +104,17 @@ class StoreImpl : public C2ComponentStore {
     }
 
   private:
+    struct Component {
+        std::shared_ptr<C2Component::Traits> traits;
+        std::unique_ptr<C2ComponentFactory> factory;
+    };
+
+    C2ComponentFactory *find(const C2String &name) {
+        for (const auto &c : mComponents)
+            if (c.traits->name == name) return c.factory.get();
+        return nullptr;
+    }
+
     class Interface : public C2InterfaceHelper {
       public:
         explicit Interface(const std::shared_ptr<C2ReflectorHelper> &helper) : C2InterfaceHelper(helper) {
@@ -125,8 +144,7 @@ class StoreImpl : public C2ComponentStore {
 
     std::shared_ptr<C2ReflectorHelper> mReflectorHelper;
     Interface mInterface;
-    std::unique_ptr<C2ComponentFactory> mFactory;
-    std::shared_ptr<C2Component::Traits> mTraits;
+    std::vector<Component> mComponents;
     std::atomic<c2_node_id_t> mNodeId{0};
 };
 
@@ -145,7 +163,8 @@ int main(int /* argc */, char ** /* argv */) {
         LOG(ERROR) << "cannot register " << serviceName;
         return 1;
     }
-    LOG(INFO) << serviceName << " registered (" << android::NvdecAvcDecName() << ")";
+    LOG(INFO) << serviceName << " registered (" << android::NvdecDecName(C2NvdecDec::AVC) << ", "
+              << android::NvdecDecName(C2NvdecDec::HEVC) << ")";
     ABinderProcess_joinThreadPool();
     return 0;
 }
