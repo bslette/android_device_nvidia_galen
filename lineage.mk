@@ -25,3 +25,8 @@ PRODUCT_VENDOR_PROPERTY_BLACKLIST := \
     ro.vendor.build.fingerprint
 PRODUCT_PACKAGES += \
     init_tegra
+
+# microG (vendor/partner_gms, bslette fork): GmsCore, FakeStore, GsfProxy without F-Droid.
+# LineageOS spoofs the Google signature only for apps signed with the microG key.
+WITH_GMS := true
+GMS_MAKEFILE := microg.mk
