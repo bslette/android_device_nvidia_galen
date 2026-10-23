@@ -479,6 +479,7 @@ struct hevcdec {
     struct t_bo surf[NSURF], bits, setup, status, coloc, filter, tiles, scaling;
     int alloc_w, alloc_h;
     unsigned pitch, luma_size, colmv_size, sao_offset, bsd_offset, flt_above_offset, sao_above_offset;
+    size_t surf_size; /* surfaces are allocated on first use */
     struct ref refs[MAX_REFS];
     int period, reorder, prev_tid0_poc;
     int need_irap;     /* after create/reset/EOS: skip to the next IRAP, which then has NoRaslOutputFlag */
@@ -510,9 +511,7 @@ static int alloc_buffers(struct hevcdec *d, const struct sps *sp) {
     unsigned w64 = ALIGN(sp->width, 64), h64 = ALIGN(sp->height, 64);
     d->pitch = w64;
     d->luma_size = ALIGN(d->pitch * h64, 4096);
-    size_t surf_size = d->luma_size + ALIGN(d->pitch * h64 / 2, 4096);
-    for (int i = 0; i < NSURF; i++)
-        if (t_bo_new(&d->dev, &d->surf[i], surf_size)) return -ENOMEM;
+    d->surf_size = d->luma_size + ALIGN(d->pitch * h64 / 2, 4096);
     /* collocated motion vectors: 16 bytes per 16x16 block, one set per surface */
     d->colmv_size = ALIGN(w64 * h64 / 16, 256);
     /* Filter buffer: tile-column (left) deblocking, SAO and BSD context sized by
@@ -532,10 +531,17 @@ static int alloc_buffers(struct hevcdec *d, const struct sps *sp) {
         t_bo_new(&d->dev, &d->setup, 4096) || t_bo_new(&d->dev, &d->status, 4096) ||
         t_bo_new(&d->dev, &d->tiles, 4096) || t_bo_new(&d->dev, &d->scaling, 4096))
         return -ENOMEM;
-    if (nvdec_vic_map(&d->vic, d->surf, d->luma_size)) return -ENOMEM;
     d->alloc_w = sp->width;
     d->alloc_h = sp->height;
     return 0;
+}
+
+/* Surfaces are allocated as the DPB first needs them: allocating all of them
+ * up front delayed the first picture by a few hundred ms. */
+static int ensure_surface(struct hevcdec *d, int s) {
+    if (d->surf[s].handle) return 0;
+    if (t_bo_new(&d->dev, &d->surf[s], d->surf_size)) return -ENOMEM;
+    return nvdec_vic_map_surface(&d->vic, s, &d->surf[s], d->luma_size);
 }
 
 static int surf_busy(const struct hevcdec *d, int s) {
@@ -639,6 +645,7 @@ static int decode_picture(struct hevcdec *d) {
     int cur = -1;
     for (int i = 0; i < NSURF && cur < 0; i++) if (!surf_busy(d, i)) cur = i;
     if (cur < 0) return -ENOSPC;
+    if ((err = ensure_surface(d, cur))) return err;
 
     memcpy(d->bits.ptr, d->pic, d->pic_len);
     memset((uint8_t *)d->bits.ptr + d->pic_len, 0, 64);
@@ -769,8 +776,11 @@ static int decode_picture(struct hevcdec *d) {
     t_mthd_addr(&j, NVC5B0_HEVC_SET_TILE_SIZES_OFFSET, &d->tiles, 0);
     t_mthd_addr(&j, NVC5B0_HEVC_SET_FILTER_BUFFER_OFFSET, &d->filter, 0);
     t_mthd_addr(&j, NVC5B0_HEVC_SET_SAO_BUFFER_OFFSET, &d->filter, d->sao_offset);
-    for (int i = 0; i < NSURF; i++) t_mthd_addr(&j, NVC5B0_SET_PICTURE_LUMA_OFFSET0 + 4 * i, &d->surf[i], 0);
-    for (int i = 0; i < NSURF; i++) t_mthd_addr(&j, NVC5B0_SET_PICTURE_CHROMA_OFFSET0 + 4 * i, &d->surf[i], d->luma_size);
+    /* slots not allocated yet hold no reference: point them at the current surface */
+    for (int i = 0; i < NSURF; i++)
+        t_mthd_addr(&j, NVC5B0_SET_PICTURE_LUMA_OFFSET0 + 4 * i, &d->surf[d->surf[i].handle ? i : cur], 0);
+    for (int i = 0; i < NSURF; i++)
+        t_mthd_addr(&j, NVC5B0_SET_PICTURE_CHROMA_OFFSET0 + 4 * i, &d->surf[d->surf[i].handle ? i : cur], d->luma_size);
     t_mthd(&j, NVC5B0_EXECUTE, EXECUTE_AWAKEN);
     t_syncpt_incr(&j, &d->dev);
     double t_submit = dec_now();
@@ -814,6 +824,8 @@ static int decode_picture(struct hevcdec *d) {
         .width = sp->width - sp->conf_left - sp->conf_right,
         .height = sp->height - sp->conf_top - sp->conf_bottom,
         .poc = poc, .period = d->period, .timestamp = d->pic_ts,
+        /* IRAP pictures without leading pictures start their period in display order */
+        .leader = s->nal_type == NAL_IDR_N_LP || s->nal_type == NAL_BLA_N_LP,
         .mbs_in_error = st->mbs_in_error, .surface = cur,
     };
     return d->cb(d->opaque, &pic) ? -ECANCELED : 0;

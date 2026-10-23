@@ -312,9 +312,16 @@ int C2NvdecDec::vicCopy(const struct nvdec_picture *pic, int fd, size_t size, un
                  : h264dec_vic_copy(mAvc, pic, fd, size, pitch, chromaOffset);
 }
 
+void C2NvdecDec::resetOutputOrder() {
+    mHaveLast = false;
+    mOddPoc = false;
+    mPicsSeen = 0;
+}
+
 c2_status_t C2NvdecDec::onStop() {
     mPending.clear();
     resetDecoder();
+    resetOutputOrder();
     mSignalledError = false;
     mSignalledOutputEos = false;
     return C2_OK;
@@ -337,6 +344,7 @@ void C2NvdecDec::onRelease() {
 c2_status_t C2NvdecDec::onFlush_sm() {
     mPending.clear();
     resetDecoder();
+    resetOutputOrder();
     mSignalledOutputEos = false;
     return C2_OK;
 }
@@ -414,7 +422,11 @@ int C2NvdecDec::handlePicture(const struct nvdec_picture *pic) {
     }
     if (!done) nvdec_copy_out(pic, y, yStride, u, v, uvStride, uvStep);
 
-    mPending.push_back({pic->period, pic->poc, pic->timestamp, std::move(block)});
+    if (mCodec == AVC) {
+        mOddPoc |= (pic->poc & 1) != 0;
+        mPicsSeen++;
+    }
+    mPending.push_back({pic->period, pic->poc, pic->leader != 0, pic->timestamp, std::move(block)});
     int depth = reorderDepth();
     if (depth >= 0 && depth != mOutputDelay) {
         C2PortActualDelayTuning::output outputDelay(std::min<int>(depth + 1, kMaxOutputDelay));
@@ -427,13 +439,30 @@ int C2NvdecDec::handlePicture(const struct nvdec_picture *pic) {
     return 0;
 }
 
+// The smallest POC step that can separate two pictures in display order. HEVC
+// counts pictures; H.264 counts fields, so frames advance by 2 unless the stream
+// has shown an odd POC (only trusted after a DPB's worth of pictures).
+int C2NvdecDec::pocStep() const {
+    return mCodec == AVC && !mOddPoc && mPicsSeen >= 16 ? 2 : 1;
+}
+
+// Output while more than `keep` pictures wait (the stream's reorder bound), and
+// also whenever the next picture in display order is already decoded: one that
+// starts a new period (no leading pictures), or one whose POC directly follows
+// the last output, so that no picture still to come can go between them.
 void C2NvdecDec::outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work) {
-    while (mPending.size() > keep) {
+    while (!mPending.empty()) {
         auto first = std::min_element(mPending.begin(), mPending.end(), [](const Pending &a, const Pending &b) {
             return a.period != b.period ? a.period < b.period : a.poc < b.poc;
         });
+        bool next = mHaveLast && first->period == mLastPeriod && first->poc == mLastPoc + pocStep();
+        bool lead = first->leader && (!mHaveLast || first->period > mLastPeriod);
+        if (mPending.size() <= keep && !next && !lead) break;
         Pending p = std::move(*first);
         mPending.erase(first);
+        mHaveLast = true;
+        mLastPeriod = p.period;
+        mLastPoc = p.poc;
         outputOne(std::move(p), work);
     }
 }
@@ -452,20 +481,23 @@ void C2NvdecDec::outputOne(Pending p, const std::unique_ptr<C2Work> &work) {
         w->workletsProcessed = 1u;
     };
     if (work && c2_cntr64_t(p.frameIndex) == work->input.ordinal.frameIndex) {
-        if (work->input.flags & C2FrameData::FLAG_END_OF_STREAM) {
-            // the EOS work is finished separately: send this picture in a clone
-            C2WorkOrdinalStruct ordinal = work->input.ordinal;
-            cloneAndSend(p.frameIndex, work, [buffer, ordinal](const std::unique_ptr<C2Work> &w) {
-                w->worklets.front()->output.flags = C2FrameData::FLAG_INCOMPLETE;
-                w->worklets.front()->output.buffers.clear();
-                w->worklets.front()->output.buffers.push_back(buffer);
-                w->worklets.front()->output.ordinal = ordinal;
-                w->workletsProcessed = 1u;
-                w->result = C2_OK;
-            });
-        } else {
-            fillWork(work);
-        }
+        // The running work would only be delivered when process() returns, after
+        // older works finished later in this call: send its picture now in a clone
+        // (with any size update), and the work itself completes empty.
+        C2WorkOrdinalStruct ordinal = work->input.ordinal;
+        std::vector<std::unique_ptr<C2Param>> configUpdate =
+                std::move(work->worklets.front()->output.configUpdate);
+        cloneAndSend(p.frameIndex, work, [buffer, ordinal, &configUpdate](const std::unique_ptr<C2Work> &w) {
+            w->worklets.front()->output.flags = C2FrameData::FLAG_INCOMPLETE;
+            w->worklets.front()->output.buffers.clear();
+            w->worklets.front()->output.buffers.push_back(buffer);
+            w->worklets.front()->output.configUpdate = std::move(configUpdate);
+            w->worklets.front()->output.ordinal = ordinal;
+            w->workletsProcessed = 1u;
+            w->result = C2_OK;
+        });
+        work->worklets.front()->output.configUpdate.clear();
+        mCurSent = true;
     } else {
         finish(p.frameIndex, fillWork);
     }
@@ -487,6 +519,7 @@ void C2NvdecDec::process(const std::unique_ptr<C2Work> &work,
         return;
     }
     mCurDecoded = false;
+    mCurSent = false;
     if (!work->input.buffers.empty()) {
         C2ReadView rView = work->input.buffers[0]->data().linearBlocks().front().map().get();
         if (rView.capacity() && rView.error()) {
@@ -517,8 +550,8 @@ void C2NvdecDec::process(const std::unique_ptr<C2Work> &work,
         outputUpTo(0, work);
         fillEmptyWork(work);
         mSignalledOutputEos = true;
-    } else if (!mCurDecoded) {
-        fillEmptyWork(work); // parameter sets only, or a skipped access unit
+    } else if (!mCurDecoded || mCurSent) {
+        fillEmptyWork(work); // parameter sets only, a skipped access unit, or the picture went out already
     } else if (work->workletsProcessed == 0 &&
                !work->worklets.front()->output.configUpdate.empty()) {
         // the picture is held for reordering: send the config update now

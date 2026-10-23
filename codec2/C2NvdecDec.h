@@ -44,6 +44,7 @@ class C2NvdecDec : public SimpleC2Component {
   private:
     struct Pending {
         int period, poc;
+        bool leader;
         uint64_t frameIndex;
         std::shared_ptr<C2GraphicBlock> block;
     };
@@ -54,6 +55,8 @@ class C2NvdecDec : public SimpleC2Component {
     int reorderDepth() const;
     int vicCopy(const struct nvdec_picture *pic, int fd, size_t size, unsigned pitch, unsigned chromaOffset);
     void outputUpTo(size_t keep, const std::unique_ptr<C2Work> &work);
+    void resetOutputOrder();
+    int pocStep() const;
     void outputOne(Pending p, const std::unique_ptr<C2Work> &work);
     bool updateSize(uint32_t width, uint32_t height, const std::unique_ptr<C2Work> &work);
 
@@ -65,6 +68,12 @@ class C2NvdecDec : public SimpleC2Component {
     std::vector<Pending> mPending;
     uint32_t mWidth = 0, mHeight = 0;
     int mOutputDelay = -1;
+    // the last picture output, to release the next one as soon as it is decoded
+    bool mHaveLast = false;
+    int mLastPeriod = 0, mLastPoc = 0;
+    // H.264 frame POCs normally advance by 2 (field units); odd ones mean steps of 1
+    bool mOddPoc = false;
+    int mPicsSeen = 0;
     bool mSignalledError = false;
     bool mSignalledOutputEos = false;
     bool mVicFailed = false;
@@ -73,6 +82,7 @@ class C2NvdecDec : public SimpleC2Component {
     const std::unique_ptr<C2Work> *mCurWork = nullptr;
     std::shared_ptr<C2BlockPool> mCurPool;
     bool mCurDecoded = false;
+    bool mCurSent = false; // its picture went out in a clone; the work completes empty
 
     C2_DO_NOT_COPY(C2NvdecDec);
 };

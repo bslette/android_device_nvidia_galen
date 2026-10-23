@@ -23,6 +23,7 @@ struct nvdec_picture {
     unsigned coded_width, coded_height;
     unsigned crop_left, crop_top, width, height; /* visible rectangle */
     int poc, period;           /* display order: by period, then poc */
+    int leader;                /* first of its period in display order (IDR without leading pictures) */
     uint64_t timestamp;        /* as passed to the decode call */
     unsigned mbs_in_error;
     int surface;               /* engine surface, for the vic_copy calls */

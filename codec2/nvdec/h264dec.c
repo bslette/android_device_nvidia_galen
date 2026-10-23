@@ -237,6 +237,7 @@ struct h264dec {
     struct t_bo surf[NSURF], bits, setup, offsets, status, coloc, mbhist, history;
     int alloc_w, alloc_h;
     unsigned pitch, luma_size;
+    size_t surf_size; /* surfaces are allocated on first use */
     struct ref refs[16];
     int period, prev_poc_msb, prev_poc_lsb, prev_frame_num, prev_frame_num_offset, reorder;
     unsigned pic_counter;
@@ -268,9 +269,7 @@ static int alloc_buffers(struct h264dec *d, const struct sps *sp) {
     unsigned w = sp->width_mbs * 16, h = sp->height_map_units * 16;
     d->pitch = ALIGN(w, 64);
     d->luma_size = ALIGN(d->pitch * ALIGN(h, 32), 4096);
-    size_t surf_size = d->luma_size + ALIGN(d->pitch * ALIGN(h / 2, 32), 4096);
-    for (int i = 0; i < NSURF; i++)
-        if (t_bo_new(&d->dev, &d->surf[i], surf_size)) return -ENOMEM;
+    d->surf_size = d->luma_size + ALIGN(d->pitch * ALIGN(h / 2, 32), 4096);
     unsigned coloc_size = ALIGN(ALIGN(sp->height_map_units, 2) * sp->width_mbs * 64 - 63, 0x100);
     if (t_bo_new(&d->dev, &d->coloc, (size_t)coloc_size * NSURF) ||
         t_bo_new(&d->dev, &d->mbhist, ALIGN(sp->width_mbs * 104, 0x100)) ||
@@ -279,10 +278,17 @@ static int alloc_buffers(struct h264dec *d, const struct sps *sp) {
         t_bo_new(&d->dev, &d->setup, sizeof(nvdec_h264_pic_s)) ||
         t_bo_new(&d->dev, &d->offsets, 4096) || t_bo_new(&d->dev, &d->status, 4096))
         return -ENOMEM;
-    if (nvdec_vic_map(&d->vic, d->surf, d->luma_size)) return -ENOMEM;
     d->alloc_w = sp->width_mbs;
     d->alloc_h = sp->height_map_units;
     return 0;
+}
+
+/* Surfaces are allocated as the DPB first needs them: allocating all of them
+ * up front delayed the first picture by a few hundred ms. */
+static int ensure_surface(struct h264dec *d, int s) {
+    if (d->surf[s].handle) return 0;
+    if (t_bo_new(&d->dev, &d->surf[s], d->surf_size)) return -ENOMEM;
+    return nvdec_vic_map_surface(&d->vic, s, &d->surf[s], d->luma_size);
 }
 
 static int surf_busy(const struct h264dec *d, int s) {
@@ -385,6 +391,7 @@ static int decode_picture(struct h264dec *d) {
     int cur = -1;
     for (int i = 0; i < NSURF && cur < 0; i++) if (!surf_busy(d, i)) cur = i;
     if (cur < 0) return -ENOSPC;
+    if ((err = ensure_surface(d, cur))) return err;
 
     memcpy(d->bits.ptr, d->pic, d->pic_len);
     unsigned *so = d->offsets.ptr;
@@ -470,8 +477,11 @@ static int decode_picture(struct h264dec *d) {
     t_mthd_addr(&j, NVC5B0_SET_COLOC_DATA_OFFSET, &d->coloc, 0);
     t_mthd_addr(&j, NVC5B0_SET_HISTORY_OFFSET, &d->history, 0);
     t_mthd_addr(&j, NVC5B0_SET_NVDEC_STATUS_OFFSET, &d->status, 0);
-    for (int i = 0; i < NSURF; i++) t_mthd_addr(&j, NVC5B0_SET_PICTURE_LUMA_OFFSET0 + 4 * i, &d->surf[i], 0);
-    for (int i = 0; i < NSURF; i++) t_mthd_addr(&j, NVC5B0_SET_PICTURE_CHROMA_OFFSET0 + 4 * i, &d->surf[i], d->luma_size);
+    /* slots not allocated yet hold no reference: point them at the current surface */
+    for (int i = 0; i < NSURF; i++)
+        t_mthd_addr(&j, NVC5B0_SET_PICTURE_LUMA_OFFSET0 + 4 * i, &d->surf[d->surf[i].handle ? i : cur], 0);
+    for (int i = 0; i < NSURF; i++)
+        t_mthd_addr(&j, NVC5B0_SET_PICTURE_CHROMA_OFFSET0 + 4 * i, &d->surf[d->surf[i].handle ? i : cur], d->luma_size);
     t_mthd_addr(&j, NVC5B0_H264_SET_MBHIST_BUF_OFFSET, &d->mbhist, 0);
     t_mthd(&j, NVC5B0_EXECUTE, EXECUTE_AWAKEN);
     t_syncpt_incr(&j, &d->dev);
@@ -507,10 +517,12 @@ static int decode_picture(struct h264dec *d) {
         .crop_left = sp->crop_left, .crop_top = sp->crop_top,
         .width = sp->width_mbs * 16 - sp->crop_left - sp->crop_right,
         .height = sp->height_map_units * 16 - sp->crop_top - sp->crop_bottom,
-        .poc = poc, .period = d->period, .timestamp = d->pic_ts,
+        .poc = poc, .period = d->period, .leader = s->idr, .timestamp = d->pic_ts,
         .mbs_in_error = st->mbs_in_error, .surface = cur,
     };
-    d->reorder = sp->max_num_reorder_frames >= 0 ? sp->max_num_reorder_frames : sp->max_num_ref_frames;
+    /* POC type 2 outputs in decoding order (8.2.1.3); otherwise the VUI bound, else the DPB */
+    d->reorder = sp->poc_type == 2 ? 0
+                 : sp->max_num_reorder_frames >= 0 ? sp->max_num_reorder_frames : sp->max_num_ref_frames;
     if (s->nal_ref_idc) mark_refs(d, s, sp, cur, poc);
     return d->cb(d->opaque, &pic) ? -ECANCELED : 0;
 }
