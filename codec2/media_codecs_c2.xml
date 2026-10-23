@@ -27,5 +27,16 @@
             <Limit name="concurrent-instances" max="8" />
             <Attribute name="hardware-accelerated" />
         </MediaCodec>
+        <!-- NVDEC needs VP9 frames of at least 128x128; smaller streams take the software decoder -->
+        <MediaCodec name="c2.rey.vp9.decoder" type="video/x-vnd.on2.vp9" rank="128">
+            <Limit name="size" min="128x128" max="4096x4096" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-65536" />
+            <Limit name="blocks-per-second" range="1-3932160" />
+            <Limit name="bitrate" range="1-120000000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
     </Decoders>
 </MediaCodecs>

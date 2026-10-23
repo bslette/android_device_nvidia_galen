@@ -12,18 +12,20 @@
 
 #include "h264dec.h"
 #include "hevcdec.h"
+#include "vp9dec.h"
 
 namespace android {
 
 /*
- * H.264 and H.265 decoders on the Tegra NVDEC engine (upstream tegra-drm
+ * H.264, H.265 and VP9 decoders on the Tegra NVDEC engine (upstream tegra-drm
  * channel UAPI). NVDEC decodes into block-linear surfaces; VIC converts each
- * picture into the NV12 graphic block that goes out (no CPU copy). Pictures
- * are held until display order is known (POC, reorder depth from the SPS).
+ * picture into the NV12 graphic block that goes out (no CPU copy). H.264/H.265
+ * pictures are held until display order is known (POC, reorder depth from the
+ * SPS); VP9 pictures come out in display order.
  */
 class C2NvdecDec : public SimpleC2Component {
   public:
-    enum Codec { AVC, HEVC };
+    enum Codec { AVC, HEVC, VP9 };
     class IntfImpl;
 
     C2NvdecDec(const char *name, c2_node_id_t id, Codec codec, const std::shared_ptr<IntfImpl> &intfImpl);
@@ -59,6 +61,7 @@ class C2NvdecDec : public SimpleC2Component {
     std::shared_ptr<IntfImpl> mIntf;
     struct h264dec *mAvc = nullptr;
     struct hevcdec *mHevc = nullptr;
+    struct vp9dec *mVp9 = nullptr;
     std::vector<Pending> mPending;
     uint32_t mWidth = 0, mHeight = 0;
     int mOutputDelay = -1;

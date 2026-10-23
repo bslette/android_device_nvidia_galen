@@ -42,25 +42,34 @@ void nvdec_vic_close(struct nvdec_vic *vic) {
     vic->ok = 0;
 }
 
-int nvdec_vic_map(struct nvdec_vic *vic, const struct t_bo *surf, unsigned chroma_offset) {
+int nvdec_vic_map_surface(struct nvdec_vic *vic, int i, const struct t_bo *surf, unsigned chroma_offset) {
     if (!vic->ok) return 0;
-    vic->chroma_offset = chroma_offset;
+    t_bo_unmap_from(&vic->ch, &vic->surf[i]);
+    vic->chroma_offset[i] = chroma_offset;
+    return t_bo_map_into(&vic->ch, surf, &vic->surf[i]) ? -ENOMEM : 0;
+}
+
+void nvdec_vic_unmap_surface(struct nvdec_vic *vic, int i) {
+    if (vic->ok) t_bo_unmap_from(&vic->ch, &vic->surf[i]);
+}
+
+int nvdec_vic_map(struct nvdec_vic *vic, const struct t_bo *surf, unsigned chroma_offset) {
     for (int i = 0; i < NVDEC_NSURF; i++)
-        if (t_bo_map_into(&vic->ch, &surf[i], &vic->surf[i])) return -ENOMEM;
+        if (nvdec_vic_map_surface(vic, i, &surf[i], chroma_offset)) return -ENOMEM;
     return 0;
 }
 
 void nvdec_vic_unmap(struct nvdec_vic *vic) {
-    if (!vic->ok) return;
-    for (int i = 0; i < NVDEC_NSURF; i++)
-        t_bo_unmap_from(&vic->ch, &vic->surf[i]);
+    for (int i = 0; i < NVDEC_NSURF; i++) nvdec_vic_unmap_surface(vic, i);
 }
 
 int nvdec_vic_copy(struct nvdec_vic *vic, const struct nvdec_picture *pic, int dmabuf_fd,
                    size_t dmabuf_size, unsigned pitch, unsigned chroma_offset) {
     if (!vic->ok) return -ENODEV;
+    /* VIC completes NV12 jobs with odd target sizes (VP9 allows them) without writing anything */
+    if ((pic->width | pic->height) & 1) return -EINVAL;
     if (pitch % 256 || chroma_offset % 256 || chroma_offset < pitch * pic->height ||
-        (size_t)chroma_offset + pitch * pic->height / 2 > dmabuf_size)
+        (size_t)chroma_offset + pitch * ((pic->height + 1) / 2) > dmabuf_size)
         return -EINVAL;
     struct t_bo dst;
     if (t_bo_import(&vic->ch, dmabuf_fd, dmabuf_size, &dst)) return -EIO;
@@ -77,7 +86,7 @@ int nvdec_vic_copy(struct nvdec_vic *vic, const struct nvdec_picture *pic, int d
     c->outputSurfaceConfig.OutLumaWidth = pitch - 1;
     c->outputSurfaceConfig.OutLumaHeight = pic->height - 1;
     c->outputSurfaceConfig.OutChromaWidth = pitch / 2 - 1;
-    c->outputSurfaceConfig.OutChromaHeight = pic->height / 2 - 1;
+    c->outputSurfaceConfig.OutChromaHeight = (pic->height + 1) / 2 - 1; /* odd heights (VP9) */
 
     SlotConfig *slot = &c->slotStruct[0].slotConfig;
     slot->SlotEnable = 1;
@@ -104,7 +113,7 @@ int nvdec_vic_copy(struct nvdec_vic *vic, const struct nvdec_picture *pic, int d
     surf->SlotLumaWidth = pic->pitch - 1;
     surf->SlotLumaHeight = pic->coded_height - 1;
     surf->SlotChromaWidth = pic->pitch / 2 - 1;
-    surf->SlotChromaHeight = pic->coded_height / 2 - 1;
+    surf->SlotChromaHeight = (pic->coded_height + 1) / 2 - 1;
 
     struct t_job j;
     t_job_init(&j);
@@ -115,7 +124,7 @@ int nvdec_vic_copy(struct nvdec_vic *vic, const struct nvdec_picture *pic, int d
     t_mthd_addr(&j, VIC_SET_OUTPUT_LUMA_OFFSET, &dst, 0);
     t_mthd_addr(&j, VIC_SET_OUTPUT_CHROMA_U_OFFSET, &dst, chroma_offset);
     t_mthd_addr(&j, VIC_SET_SURFACE0_LUMA_OFFSET, &vic->surf[pic->surface], 0);
-    t_mthd_addr(&j, VIC_SET_SURFACE0_CHROMA_U_OFFSET, &vic->surf[pic->surface], vic->chroma_offset);
+    t_mthd_addr(&j, VIC_SET_SURFACE0_CHROMA_U_OFFSET, &vic->surf[pic->surface], vic->chroma_offset[pic->surface]);
     t_mthd(&j, VIC_EXECUTE, EXECUTE_AWAKEN);
     t_syncpt_incr(&j, &vic->ch);
     int err = t_submit_wait(&vic->ch, &j, 1000, NULL) ? -ETIMEDOUT : 0;
@@ -143,13 +152,13 @@ void nvdec_copy_out(const struct nvdec_picture *pic, uint8_t *y, int y_stride,
             x += n;
         }
     }
-    for (unsigned row = 0; row < h / 2; row++) {
+    for (unsigned row = 0; row < (h + 1) / 2; row++) {
         uint8_t *du = u + (size_t)row * uv_stride, *dv = v + (size_t)row * uv_stride;
         unsigned sy = y0 / 2 + row, x = 0;
 #if defined(__aarch64__)
         /* whole 16-byte sectors (8 UV pairs) when the crop is sector aligned */
         if (x0 % 16 == 0)
-            for (; x + 8 <= w / 2; x += 8) {
+            for (; x + 8 <= (w + 1) / 2; x += 8) {
                 uint8x8x2_t uv = vld2_u8(pic->chroma + tbl_offset(pic->pitch, x0 + 2 * x, sy));
                 if (uv_step == 1) {
                     vst1_u8(du + x, uv.val[0]);
@@ -164,7 +173,7 @@ void nvdec_copy_out(const struct nvdec_picture *pic, uint8_t *y, int y_stride,
                 }
             }
 #endif
-        for (; x < w / 2; x++) {
+        for (; x < (w + 1) / 2; x++) {
             unsigned sx = x0 + 2 * x; /* byte offset of the U sample in the NV12 row */
             const uint8_t *src = pic->chroma + tbl_offset(pic->pitch, sx & ~15u, sy) + (sx % 16);
             du[x * uv_step] = src[0];

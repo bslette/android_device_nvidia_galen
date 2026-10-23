@@ -35,7 +35,7 @@ struct nvdec_vic {
     struct t_dev ch;
     int ok;
     struct t_bo config, filter, surf[NVDEC_NSURF];
-    unsigned chroma_offset; /* of the mapped decoder surfaces */
+    unsigned chroma_offset[NVDEC_NSURF]; /* of the mapped decoder surfaces */
 };
 
 /* Open VIC on the decoder's DRM fd; failure leaves vic->ok == 0. */
@@ -44,6 +44,9 @@ void nvdec_vic_close(struct nvdec_vic *vic);
 /* Map the decoder surfaces (chroma plane at chroma_offset) into VIC. */
 int nvdec_vic_map(struct nvdec_vic *vic, const struct t_bo *surf, unsigned chroma_offset);
 void nvdec_vic_unmap(struct nvdec_vic *vic);
+/* The same for one surface, for decoders whose surfaces differ in size (VP9). */
+int nvdec_vic_map_surface(struct nvdec_vic *vic, int i, const struct t_bo *surf, unsigned chroma_offset);
+void nvdec_vic_unmap_surface(struct nvdec_vic *vic, int i);
 /*
  * Convert the visible part of a picture into a pitch-linear NV12 dma-buf: luma
  * at offset 0, interleaved chroma at chroma_offset. pitch and chroma_offset

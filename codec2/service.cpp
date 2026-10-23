@@ -41,7 +41,8 @@ class StoreImpl : public C2ComponentStore {
         : mReflectorHelper(std::make_shared<C2ReflectorHelper>()),
           mInterface(mReflectorHelper) {
         for (auto [codec, mediaType] : {std::pair{C2NvdecDec::AVC, "video/avc"},
-                                        std::pair{C2NvdecDec::HEVC, "video/hevc"}}) {
+                                        std::pair{C2NvdecDec::HEVC, "video/hevc"},
+                                        std::pair{C2NvdecDec::VP9, "video/x-vnd.on2.vp9"}}) {
             auto traits = std::make_shared<C2Component::Traits>();
             traits->name = android::NvdecDecName(codec);
             traits->domain = C2Component::DOMAIN_VIDEO;
@@ -164,7 +165,8 @@ int main(int /* argc */, char ** /* argv */) {
         return 1;
     }
     LOG(INFO) << serviceName << " registered (" << android::NvdecDecName(C2NvdecDec::AVC) << ", "
-              << android::NvdecDecName(C2NvdecDec::HEVC) << ")";
+              << android::NvdecDecName(C2NvdecDec::HEVC) << ", " << android::NvdecDecName(C2NvdecDec::VP9)
+              << ")";
     ABinderProcess_joinThreadPool();
     return 0;
 }
