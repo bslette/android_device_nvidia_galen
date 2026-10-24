@@ -2,7 +2,8 @@
  * Copyright (C) 2026 The LineageOS Project
  * SPDX-License-Identifier: Apache-2.0
  *
- * Codec2 IComponentStore "default" for galen: the NVDEC H.264 and H.265 decoders.
+ * Codec2 IComponentStore "default" for galen: the NVDEC H.264, H.265 and VP9
+ * decoders and the NVENC H.264 encoder.
  * Based on AOSP's sample vendor service (frameworks/av/media/codec2/hal/services).
  */
 
@@ -26,6 +27,7 @@
 #include <signal.h>
 
 #include "C2NvdecDec.h"
+#include "C2NvencEnc.h"
 
 using android::C2NvdecDec;
 
@@ -54,6 +56,15 @@ class StoreImpl : public C2ComponentStore {
                     {traits, std::unique_ptr<C2ComponentFactory>(
                                      android::CreateNvdecDecFactory(mReflectorHelper, codec))});
         }
+        auto traits = std::make_shared<C2Component::Traits>();
+        traits->name = android::NvencEncName();
+        traits->domain = C2Component::DOMAIN_VIDEO;
+        traits->kind = C2Component::KIND_ENCODER;
+        traits->rank = 0x80; // ahead of the software encoders (0x200)
+        traits->mediaType = "video/avc";
+        traits->owner = "default";
+        mComponents.push_back(
+                {traits, std::unique_ptr<C2ComponentFactory>(android::CreateNvencEncFactory(mReflectorHelper))});
     }
 
     C2String getName() const override { return "default"; }
@@ -166,7 +177,7 @@ int main(int /* argc */, char ** /* argv */) {
     }
     LOG(INFO) << serviceName << " registered (" << android::NvdecDecName(C2NvdecDec::AVC) << ", "
               << android::NvdecDecName(C2NvdecDec::HEVC) << ", " << android::NvdecDecName(C2NvdecDec::VP9)
-              << ")";
+              << ", " << android::NvencEncName() << ")";
     ABinderProcess_joinThreadPool();
     return 0;
 }
