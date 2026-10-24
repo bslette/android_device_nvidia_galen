@@ -515,11 +515,16 @@ static int alloc_buffers(struct hevcdec *d, const struct sps *sp) {
     /* collocated motion vectors: 16 bytes per 16x16 block, one set per surface */
     d->colmv_size = ALIGN(w64 * h64 / 16, 256);
     /* Filter buffer: tile-column (left) deblocking, SAO and BSD context sized by
-     * height, then the above-row deblocking and SAO lines sized by width, with
-     * room to spare at the end. */
+     * height, then the above-row deblocking and SAO data, with room to spare at
+     * the end. The Xavier firmware keeps the above-row deblocking data per CTB
+     * row, not in one line as nvdec_drv.h's HEVC_DBLK_TOP_BUF_SIZE assumes: it
+     * needs about 128 bytes per 16 columns per CTB row (measured: 4x the macro
+     * at 1080 rows, 7x at 2160, any width). Twice that, and at least 4x the macro. */
     unsigned dblk_left = HEVC_DBLK_LEFT_BUF_SIZE(h64) * 4, sao_left = HEVC_SAO_LEFT_BUF_SIZE(h64) * 4;
     unsigned bsd = NVDEC_ALIGN(h64 * GIP_ASIC_BSD_CTRL_RAM_SIZE * 20) * 4;
-    unsigned dblk_top = HEVC_DBLK_TOP_BUF_SIZE(w64) * 4, sao_top = HEVC_DBLK_TOP_BUF_SIZE(w64) * 4;
+    unsigned above = NVDEC_ALIGN((h64 / 64 + 2) * (w64 / 16 + 2) * 256);
+    if (above < HEVC_DBLK_TOP_BUF_SIZE(w64) * 4) above = HEVC_DBLK_TOP_BUF_SIZE(w64) * 4;
+    unsigned dblk_top = above, sao_top = above;
     d->sao_offset = dblk_left;
     d->bsd_offset = d->sao_offset + sao_left;
     d->flt_above_offset = d->bsd_offset + bsd;
